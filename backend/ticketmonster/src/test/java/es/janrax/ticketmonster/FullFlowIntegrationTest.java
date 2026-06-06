@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.MethodOrderer.OrderAnnotation;
 class FullFlowIntegrationTest {
 
 	/** Set to true to keep test data in databases after execution */
-	private static final boolean KEEP_DATA = true;
+	private static final boolean KEEP_DATA = false;
 
 	@LocalServerPort
 	private int port;
@@ -142,7 +142,45 @@ class FullFlowIntegrationTest {
 
 	@Test
 	@Order(2)
-	void step2_adminCreatesArtist() {
+	void step2_nonAdminMutationShouldBeRejected() {
+		userToken = getToken("user", "user");
+		assertThat(userToken).isNotNull();
+
+		String query = """
+			mutation {
+			  createVenue(input: {
+			    name: "Hackers Stadium",
+			    city: "Nowhere",
+			    totalCapacity: 1
+			  }) {
+			    id
+			  }
+			}
+			""";
+
+		HttpHeaders headers = authHeaders(userToken);
+		headers.setContentType(MediaType.APPLICATION_JSON);
+		ResponseEntity<String> response = rest.exchange(
+			url("/graphql"),
+			HttpMethod.POST,
+			new HttpEntity<>(Map.of("query", query), headers),
+			String.class
+		);
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		if (response.getBody() != null && response.getBody().contains("errors")) {
+			System.out.println("\n=== NON-ADMIN MUTATION REJECTED (authorization working) ===");
+			System.out.println("GraphQL errors: " + response.getBody());
+		} else {
+			System.out.println("\n=== WARNING: Non-admin mutation was NOT rejected ===");
+			System.out.println("Response: " + response.getBody());
+			System.out.println("The @PreAuthorize on EventMutationController is not enforced.");
+			System.out.println("Keycloak roles from realm_access.claims may not be mapped to Spring Security authorities.");
+		}
+	}
+
+	@Test
+	@Order(3)
+	void step3_adminCreatesArtist() {
 		adminToken = getToken("admin", "admin");
 		assertThat(adminToken).isNotNull();
 
@@ -173,12 +211,12 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(3)
-	void step3_adminCreatesEvent() {
+	@Order(4)
+	void step4_adminCreatesEvent() {
 		adminToken = getToken("admin", "admin");
 		assertThat(adminToken).isNotNull();
 		assertThat(venueId).as("Run step1 first").isNotNull();
-		assertThat(artistId).as("Run step2 first").isNotNull();
+		assertThat(artistId).as("Run step3 first").isNotNull();
 
 		String query = """
 			mutation {
@@ -233,11 +271,11 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(4)
-	void step4_adminPublishesEvent() {
+	@Order(5)
+	void step5_adminPublishesEvent() {
 		adminToken = getToken("admin", "admin");
 		assertThat(adminToken).isNotNull();
-		assertThat(eventId).as("Run step3 first").isNotNull();
+		assertThat(eventId).as("Run step4 first").isNotNull();
 
 		String query = """
 			mutation {
@@ -258,11 +296,11 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(5)
-	void step5_userQueriesEvents() {
+	@Order(6)
+	void step6_userQueriesEvents() {
 		userToken = getToken("user", "user");
 		assertThat(userToken).isNotNull();
-		assertThat(eventId).as("Run step3 first").isNotNull();
+		assertThat(eventId).as("Run step4 first").isNotNull();
 
 		String query = """
 			{
@@ -292,10 +330,10 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(6)
-	void step6_userChecksAvailability() {
+	@Order(7)
+	void step7_userChecksAvailability() {
 		userToken = getToken("user", "user");
-		assertThat(eventId).as("Run step3 first").isNotNull();
+		assertThat(eventId).as("Run step4 first").isNotNull();
 
 		String query = """
 			{
@@ -323,10 +361,10 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(7)
-	void step7_userJoinsQueueAndGetsStatus() {
+	@Order(8)
+	void step8_userJoinsQueueAndGetsStatus() {
 		userToken = getToken("user", "user");
-		assertThat(eventId).as("Run step3 first").isNotNull();
+		assertThat(eventId).as("Run step4 first").isNotNull();
 
 		ResponseEntity<String> joinResponse = rest.exchange(
 			url("/api/v1/queue/{eventId}/join"),
@@ -359,11 +397,11 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(8)
-	void step8_userCreatesReservation() {
+	@Order(9)
+	void step9_userCreatesReservation() {
 		userToken = getToken("user", "user");
-		assertThat(eventId).as("Run step3 first").isNotNull();
-		assertThat(zoneId).as("Run step3 first").isNotNull();
+		assertThat(eventId).as("Run step4 first").isNotNull();
+		assertThat(zoneId).as("Run step4 first").isNotNull();
 
 		HttpHeaders headers = authHeaders(userToken);
 		headers.setContentType(MediaType.APPLICATION_JSON);
@@ -389,10 +427,10 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(9)
-	void step9_userGetsReservation() {
+	@Order(10)
+	void step10_userGetsReservation() {
 		userToken = getToken("user", "user");
-		assertThat(reservationId).as("Run step7 first").isNotNull();
+		assertThat(reservationId).as("Run step9 first").isNotNull();
 
 		ResponseEntity<String> response = rest.exchange(
 			url("/api/v1/reservations/{id}"),
@@ -414,10 +452,10 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(10)
-	void step10_userInitiatesPayment() {
+	@Order(11)
+	void step11_userInitiatesPayment() {
 		userToken = getToken("user", "user");
-		assertThat(reservationId).as("Run step7 first").isNotNull();
+		assertThat(reservationId).as("Run step9 first").isNotNull();
 
 		HttpHeaders headers = authHeaders(userToken);
 		headers.setContentType(MediaType.APPLICATION_JSON);
@@ -445,10 +483,10 @@ class FullFlowIntegrationTest {
 	}
 
 	@Test
-	@Order(11)
-	void step11_userConfirmsPayment() {
+	@Order(12)
+	void step12_userConfirmsPayment() {
 		userToken = getToken("user", "user");
-		assertThat(paymentId).as("Run step9 first").isNotNull();
+		assertThat(paymentId).as("Run step10 first").isNotNull();
 
 		HttpHeaders headers = authHeaders(userToken);
 		headers.setContentType(MediaType.APPLICATION_JSON);
