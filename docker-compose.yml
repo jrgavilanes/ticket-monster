@@ -1,0 +1,241 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["infra", "app", "dev"]
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ticketmonster}
+      POSTGRES_USER: ${POSTGRES_USER:-ticketmonster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ticketmonster}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ticketmonster}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongodb:
+    image: mongo:7
+    profiles: ["infra", "app", "dev"]
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-ticketmonster}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-ticketmonster}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-ticketmonster_catalog}
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["infra", "app", "dev"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --notify-keyspace-events Ex
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redpanda:
+    image: redpandadata/redpanda:v24.3.5
+    profiles: ["infra", "app", "dev"]
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+    ports:
+      - "19092:19092"
+      - "18082:18082"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redpanda-init:
+    image: redpandadata/redpanda:v24.3.5
+    profiles: ["infra", "app", "dev"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for topic in reservation-created reservation-cancelled reservation-expired payment-confirmed payment-refund-required; do
+          rpk topic create $$topic --brokers redpanda:9092 2>/dev/null || true
+        done
+        echo "All topics created"
+
+  redpanda-console:
+    image: redpandadata/console:v2.8.2
+    profiles: ["infra", "app", "dev"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "${REDPANDA_CONSOLE_PORT:-8081}:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    profiles: ["infra", "app", "dev"]
+    command: start-dev --import-realm
+    ports:
+      - "${KEYCLOAK_PORT:-8180}:8080"
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-ticketmonster}
+      KC_DB_USERNAME: ${POSTGRES_USER:-ticketmonster}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-ticketmonster}
+    volumes:
+      - ./docker/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q '200\\|UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ["infra", "app", "dev"]
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+
+  loki:
+    image: grafana/loki:3.4.2
+    profiles: ["infra", "app", "dev"]
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./docker/loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+
+  tempo:
+    image: grafana/tempo:2.7.0
+    profiles: ["infra", "app", "dev"]
+    ports:
+      - "${TEMPO_PORT:-3200}:3200"
+      - "4317:4317"
+      - "4318:4318"
+    command:
+      - -config.file=/etc/tempo.yaml
+    volumes:
+      - tempo-data:/var/tempo
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    profiles: ["infra", "app", "dev"]
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  ticketmonster:
+    build:
+      context: ./backend/ticketmonster
+      dockerfile: Dockerfile
+    profiles: ["app"]
+    ports:
+      - "${MONOLITH_PORT:-8082}:8082"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-ticketmonster}
+      POSTGRES_USER: ${POSTGRES_USER:-ticketmonster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ticketmonster}
+      MONGO_HOST: mongodb
+      MONGO_PORT: "27017"
+      MONGO_USER: ${MONGO_USER:-ticketmonster}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:-ticketmonster}
+      MONGO_DB: ${MONGO_DB:-ticketmonster_catalog}
+      MONGO_AUTH_DB: admin
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/ticket-monster
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/ticket-monster/protocol/openid-connect/certs
+      SERVER_PORT: "8082"
+      SPRING_PROFILES_ACTIVE: docker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+      dockerfile: Dockerfile
+    profiles: ["app"]
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    environment:
+      MONOLITH_URI: http://ticketmonster:8082
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/ticket-monster
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/ticket-monster/protocol/openid-connect/certs
+      GATEWAY_PORT: "8080"
+    depends_on:
+      ticketmonster:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  mongodb-data:
+  redis-data:
+  redpanda-data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <timeZone>UTC</timeZone>
+                </timestamp>
+                <logLevel/>
+                <loggerName>
+                    <shortenedLoggerNameLength>36</shortenedLoggerNameLength>
+                </loggerName>
+                <message/>
+                <stackTrace/>
+                <mdc>
+                    <includeMdcKeyName>trace_id</includeMdcKeyName>
+                    <includeMdcKeyName>span_id</includeMdcKeyName>
+                </mdc>
+            </providers>
+        </encoder>
+    </appender>
+
+    <appender name="CONSOLE_PLAIN" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <springProfile name="default">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE_PLAIN"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!default">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <logger name="es.janrax.ticketmonster.catalog" level="DEBUG"/>
+    <logger name="es.janrax.ticketmonster.queue" level="DEBUG"/>
+    <logger name="es.janrax.ticketmonster.reservation" level="DEBUG"/>
+    <logger name="es.janrax.ticketmonster.payment" level="DEBUG"/>
+</configuration>
