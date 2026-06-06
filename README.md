@@ -252,36 +252,143 @@ flowchart TB
 ### 1. Start infrastructure
 ```bash
 cp .env.example .env
-docker compose --profile infra up -d
+docker compose --profile dev up -d
 ```
 
-### 2. Run from IDE
-Start `TicketmonsterApplication` and `ApiGatewayApplication` from your IDE. They will connect to the Docker Compose infrastructure.
+This starts PostgreSQL, MongoDB, Redis, Redpanda, Keycloak, Prometheus, Loki, Tempo, and Grafana.
 
-### 3. Full stack
+### 2. Run the application
+```bash
+cd backend/ticketmonster
+./gradlew bootRun
+```
+
+The app connects to infrastructure on:
+- PostgreSQL → `localhost:5432`
+- MongoDB → `localhost:27017`
+- Redis → `localhost:6379`
+- Redpanda (Kafka) → `localhost:19092`
+- Keycloak → `localhost:8180`
+
+> **Note:** Redpanda exposes Kafka on port `19092` externally (not the default `9092`).
+> Keycloak is on port `8180` (not `8080`) to avoid conflict with the API Gateway.
+
+### 3. Get an access token
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=ticket-monster-app" \
+  -d "username=user" -d "password=user" \
+  -d "grant_type=password" | jq -r '.access_token')
+```
+
+### 4. Try the API
+
+```bash
+# Query events via GraphQL
+curl -s http://localhost:8082/graphql \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ events(page: 0, size: 10) { content { id name } } }"}'
+
+# Join virtual queue
+curl -s -X POST http://localhost:8082/api/v1/queue/EVENT_ID/join \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Full stack (Docker only)
 ```bash
 docker compose --profile app up -d
 ```
 
-### 4. Reset data
+This also builds and runs `ticketmonster` and `api-gateway` inside Docker.
+
+### Reset data
 ```bash
 docker compose down -v
 ```
 
-### Test users (Keycloak)
-| User | Password | Role |
-|---|---|---|
-| admin | admin | ADMIN |
-| user | user | USER |
+---
+
+### Database consoles & queries
+
+#### PostgreSQL (Reservations, Payments)
+
+```bash
+# Interactive shell
+docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster
+
+# Quick queries
+docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c "SELECT * FROM zone_stock;"
+docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c "SELECT * FROM reservations;"
+docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c "SELECT * FROM reservation_items;"
+docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c "SELECT * FROM payments;"
+docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c "SELECT * FROM payment_audit;"
+```
+
+#### MongoDB (Catalog: events, venues, artists)
+
+```bash
+# Interactive shell
+docker exec -it ticket-monster-mongodb-1 mongosh admin -u ticketmonster -p ticketmonster
+
+# Quick queries
+docker exec -it ticket-monster-mongodb-1 mongosh --quiet admin -u ticketmonster -p ticketmonster \
+  --eval 'db.getSiblingDB("ticketmonster_catalog").events.find().pretty()'
+docker exec -it ticket-monster-mongodb-1 mongosh --quiet admin -u ticketmonster -p ticketmonster \
+  --eval 'db.getSiblingDB("ticketmonster_catalog").venues.find().pretty()'
+docker exec -it ticket-monster-mongodb-1 mongosh --quiet admin -u ticketmonster -p ticketmonster \
+  --eval 'db.getSiblingDB("ticketmonster_catalog").artists.find().pretty()'
+```
+
+#### Redis (Queue, Locks)
+
+```bash
+# Interactive shell
+docker exec -it ticket-monster-redis-1 redis-cli
+
+# Quick queries
+docker exec -it ticket-monster-redis-1 redis-cli KEYS '*'
+docker exec -it ticket-monster-redis-1 redis-cli LLEN queue:EVENT_ID
+docker exec -it ticket-monster-redis-1 redis-cli LRANGE queue:EVENT_ID 0 -1
+```
+
+#### Redpanda Console (Kafka topics)
+
+Open http://localhost:8081 in a browser to browse topics, messages, and consumer groups.
+
+```bash
+# List topics via CLI
+docker exec -it ticket-monster-redpanda-1 rpk topic list
+
+# Consume messages from a topic
+docker exec -it ticket-monster-redpanda-1 rpk topic consume payment-confirmed -n 5
+```
+
+#### Keycloak Admin Console
+
+http://localhost:8180/admin (admin / admin)
+
+---
+
+### Test users
+
+| User | Password | Roles |
+|------|----------|-------|
+| `admin` | `admin` | ADMIN, USER |
+| `user` | `user` | USER |
 
 ### Endpoints
+
 | Service | URL |
-|---|---|
+|---------|-----|
 | API Gateway | http://localhost:8080 |
-| Monolith | http://localhost:8082 |
+| Monolith (app) | http://localhost:8082 |
+| GraphQL endpoint | http://localhost:8082/graphql |
 | Keycloak | http://localhost:8180 |
 | Redpanda Console | http://localhost:8081 |
 | Grafana | http://localhost:3000 |
+| Prometheus | http://localhost:9090 |
 
 ## Provisioning (Remote K3s)
 

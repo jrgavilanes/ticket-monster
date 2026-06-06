@@ -1,0 +1,31 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  flyway:
+    enabled: false
+  kafka:
+    bootstrap-servers: localhost:19092
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8180/realms/ticket-monster
+          jwk-set-uri: http://localhost:8180/realms/ticket-monster/protocol/openid-connect/certs
+  data:
+    mongodb:
+      host: localhost
+      port: 27017
+      database: ticketmonster_catalog_test
+      username: ticketmonster
+      password: ticketmonster
+      authentication-database: admin
+ticketmonster:
+  reservation:
+    ttl-minutes: 10
+    max-tickets-per-customer: 3
+  queue:
+    batch-size: 500
+    batch-interval-ms: 2000
+    token-ttl-minutes: 5
+    token-secret: test-secret-for-unit-tests

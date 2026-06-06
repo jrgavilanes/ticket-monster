@@ -13,7 +13,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     open-in-view: false
     properties:
       hibernate:
@@ -26,9 +26,14 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  mongodb:
+    host: ${MONGO_HOST:localhost}
+    port: ${MONGO_PORT:27017}
+    database: ${MONGO_DB:ticketmonster_catalog}
+    username: ${MONGO_USER:ticketmonster}
+    password: ${MONGO_PASSWORD:ticketmonster}
+    authentication-database: ${MONGO_AUTH_DB:admin}
   data:
-    mongodb:
-      uri: mongodb://${MONGO_USER:ticketmonster}:${MONGO_PASSWORD:ticketmonster}@${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DB:ticketmonster_catalog}?authSource=${MONGO_AUTH_DB:admin}
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
@@ -36,7 +41,7 @@ spring:
       timeout: 2000ms
 
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -54,8 +59,8 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/ticket-monster}
-          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/ticket-monster/protocol/openid-connect/certs}
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/ticket-monster}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/ticket-monster/protocol/openid-connect/certs}
 
   graphql:
     graphiql:
