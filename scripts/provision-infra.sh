@@ -161,7 +161,8 @@ helm upgrade --install keycloak bitnami/keycloak \
     --set externalDatabase.port=5432 \
     --set externalDatabase.user=ticketmonster \
     --set externalDatabase.password="$(kubectl get secret postgresql-credentials -n infrastructure -o jsonpath='{.data.ticketmonster-password}' | base64 -d)" \
-    --set externalDatabase.database=keycloak \
+    --set externalDatabase.database=ticketmonster \
+    --set externalDatabase.schema=keycloak \
     --wait --timeout 5m
 echo "==> Keycloak deployed"
 

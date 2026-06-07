@@ -43,3 +43,5 @@ env:
   REDIS_PORT: "6379"
   KAFKA_BOOTSTRAP_SERVERS: redpanda.infrastructure.svc.cluster.local:9092
   KEYCLOAK_ISSUER_URI: http://keycloak.infrastructure.svc.cluster.local:8080/realms/ticket-monster
+  RESERVATION_SCHEMA: reservation
+  PAYMENT_SCHEMA: payment

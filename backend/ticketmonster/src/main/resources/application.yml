@@ -13,7 +13,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
     open-in-view: false
     properties:
       hibernate:
@@ -22,9 +22,7 @@ spring:
           time_zone: UTC
 
   flyway:
-    enabled: true
-    locations: classpath:db/migration
-    baseline-on-migrate: true
+    enabled: false
 
   mongodb:
     host: ${MONGO_HOST:localhost}
@@ -128,3 +126,8 @@ ticketmonster:
     batch-size: ${QUEUE_BATCH_SIZE:500}
     batch-interval-ms: ${QUEUE_BATCH_INTERVAL_MS:2000}
     token-ttl-minutes: ${QUEUE_TOKEN_TTL_MINUTES:5}
+
+app:
+  datasource:
+    reservation-schema: ${RESERVATION_SCHEMA:reservation}
+    payment-schema: ${PAYMENT_SCHEMA:payment}

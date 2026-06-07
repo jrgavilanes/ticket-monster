@@ -11,6 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ticketmonster}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ticketmonster}"]
       interval: 5s
@@ -109,6 +110,7 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-ticketmonster}
       KC_DB_USERNAME: ${POSTGRES_USER:-ticketmonster}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-ticketmonster}
+      KC_DB_SCHEMA: keycloak
     volumes:
       - ./docker/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
     depends_on:

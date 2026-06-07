@@ -77,11 +77,11 @@ class FullFlowIntegrationTest {
 	}
 
 	private void cleanDatabases() {
-		jdbc.execute("DELETE FROM payment_audit");
-		jdbc.execute("DELETE FROM payments");
-		jdbc.execute("DELETE FROM reservation_items");
-		jdbc.execute("DELETE FROM reservations");
-		jdbc.execute("DELETE FROM zone_stock");
+		jdbc.execute("DELETE FROM payment.payment_audit");
+		jdbc.execute("DELETE FROM payment.payments");
+		jdbc.execute("DELETE FROM reservation.reservation_items");
+		jdbc.execute("DELETE FROM reservation.reservations");
+		jdbc.execute("DELETE FROM reservation.zone_stock");
 
 		mongo.dropCollection("events");
 		mongo.dropCollection("venues");
@@ -94,9 +94,9 @@ class FullFlowIntegrationTest {
 	}
 
 	private void printInspectionCommands() {
-		System.out.println("PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM zone_stock;\"");
-		System.out.println("PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservations;\"");
-		System.out.println("PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM payments;\"");
+		System.out.println("PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservation.zone_stock;\"");
+		System.out.println("PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservation.reservations;\"");
+		System.out.println("PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM payment.payments;\"");
 		System.out.println("MongoDB:    docker exec -it ticket-monster-mongodb-1 mongosh admin -u ticketmonster -p ticketmonster --eval 'db.getSiblingDB(\"ticketmonster_catalog\").events.find().pretty()'");
 		System.out.println("Redis:      docker exec -it ticket-monster-redis-1 redis-cli KEYS '*'");
 		System.out.println("Kafka:      http://localhost:8081/topics/payment-confirmed");
@@ -258,7 +258,7 @@ class FullFlowIntegrationTest {
 		for (Map<String, Object> zone : zones) {
 			String zId = (String) zone.get("id");
 			int capacity = (int) zone.get("capacity");
-			jdbc.update("INSERT INTO zone_stock (event_id, zone_id, total_capacity, available_count) VALUES (?, ?, ?, ?)",
+			jdbc.update("INSERT INTO reservation.zone_stock (event_id, zone_id, total_capacity, available_count) VALUES (?, ?, ?, ?)",
 					eventId, zId, capacity, capacity);
 		}
 
@@ -267,7 +267,7 @@ class FullFlowIntegrationTest {
 		System.out.println("Zone (Campo) ID: " + zoneId);
 		System.out.println("All zones inserted into zone_stock");
 		System.out.println("Check MongoDB: docker exec -it ticket-monster-mongodb-1 mongosh admin -u ticketmonster -p ticketmonster --eval 'db.getSiblingDB(\"ticketmonster_catalog\").events.find({\"_id\": \"" + eventId + "\"}).pretty()'");
-		System.out.println("Check zone_stock: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM zone_stock WHERE event_id = '" + eventId + "';\"");
+		System.out.println("Check zone_stock: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservation.zone_stock WHERE event_id = '" + eventId + "';\"");
 	}
 
 	@Test
@@ -357,7 +357,7 @@ class FullFlowIntegrationTest {
 		for (int i = 0; i < zoneIds.size(); i++) {
 			System.out.println("Zone: " + zoneIds.get(i) + " | Capacity: " + capacities.get(i) + " | Available: " + available.get(i));
 		}
-		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM zone_stock WHERE event_id = '" + eventId + "';\"");
+		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservation.zone_stock WHERE event_id = '" + eventId + "';\"");
 	}
 
 	@Test
@@ -422,8 +422,8 @@ class FullFlowIntegrationTest {
 
 		System.out.println("\n=== RESERVATION CREATED ===");
 		System.out.println("ID: " + reservationId);
-		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservations WHERE id = '" + reservationId + "';\"");
-		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservation_items WHERE reservation_id = '" + reservationId + "';\"");
+		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservation.reservations WHERE id = '" + reservationId + "';\"");
+		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM reservation.reservation_items WHERE reservation_id = '" + reservationId + "';\"");
 	}
 
 	@Test
@@ -478,8 +478,8 @@ class FullFlowIntegrationTest {
 
 		System.out.println("\n=== PAYMENT INITIATED ===");
 		System.out.println("ID: " + paymentId);
-		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM payments WHERE id = '" + paymentId + "';\"");
-		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM payment_audit WHERE payment_id = '" + paymentId + "';\"");
+		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM payment.payments WHERE id = '" + paymentId + "';\"");
+		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM payment.payment_audit WHERE payment_id = '" + paymentId + "';\"");
 	}
 
 	@Test
@@ -505,7 +505,7 @@ class FullFlowIntegrationTest {
 
 		System.out.println("\n=== PAYMENT CONFIRMED ===");
 		System.out.println("Payment ID: " + paymentId);
-		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM payments WHERE id = '" + paymentId + "';\"");
+		System.out.println("Check PostgreSQL: docker exec -it ticket-monster-postgres-1 psql -U ticketmonster -d ticketmonster -c \"SELECT * FROM payment.payments WHERE id = '" + paymentId + "';\"");
 		System.out.println("Check Redpanda Console: http://localhost:8081/topics/payment-confirmed");
 	}
 
