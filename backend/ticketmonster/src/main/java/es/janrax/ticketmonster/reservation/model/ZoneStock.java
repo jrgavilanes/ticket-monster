@@ -3,7 +3,7 @@ package es.janrax.ticketmonster.reservation.model;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "zone_stock")
+@Table(name = "zone_stock", schema = "reservation")
 public class ZoneStock {
 
 	@Id
