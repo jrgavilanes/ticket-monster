@@ -1,0 +1,144 @@
+type Query {
+    events(page: Int = 0, size: Int = 20): EventPage!
+    event(id: ID!): Event
+    searchEvents(query: String!, type: EventType, dateFrom: String, dateTo: String, venueId: ID, page: Int = 0, size: Int = 20): EventPage!
+    availability(eventId: ID!): [ZoneAvailability!]!
+}
+
+type Mutation {
+    createEvent(input: CreateEventInput!): Event!
+    updateEvent(id: ID!, input: UpdateEventInput!): Event!
+    deleteEvent(id: ID!): Boolean!
+    createVenue(input: CreateVenueInput!): Venue!
+    createArtist(input: CreateArtistInput!): Artist!
+}
+
+type EventPage {
+    content: [Event!]!
+    totalElements: Int!
+    totalPages: Int!
+    page: Int!
+    size: Int!
+}
+
+type Event {
+    id: ID!
+    name: String!
+    description: String
+    type: EventType!
+    date: String!
+    endDate: String
+    venue: Venue!
+    artists: [Artist!]!
+    zones: [Zone!]!
+    status: EventStatus!
+    createdAt: String!
+    updatedAt: String!
+}
+
+type Venue {
+    id: ID!
+    name: String!
+    description: String
+    location: Location!
+    totalCapacity: Int!
+    layoutType: String
+}
+
+type Location {
+    address: String
+    city: String
+    country: String
+    latitude: Float
+    longitude: Float
+}
+
+type Artist {
+    id: ID!
+    name: String!
+    genre: String
+    bio: String
+    imageUrl: String
+}
+
+type Zone {
+    id: ID!
+    name: String!
+    capacity: Int!
+    price: Float!
+    section: String
+}
+
+type ZoneAvailability {
+    zoneId: ID!
+    zoneName: String!
+    totalCapacity: Int!
+    reservedCount: Int!
+    availableCount: Int!
+}
+
+enum EventType {
+    CONCERT
+    SPORTS
+    THEATER
+    FESTIVAL
+    CONFERENCE
+    OTHER
+}
+
+enum EventStatus {
+    DRAFT
+    PUBLISHED
+    CANCELLED
+    COMPLETED
+}
+
+input CreateEventInput {
+    name: String!
+    description: String
+    type: EventType!
+    date: String!
+    endDate: String
+    venueId: ID!
+    artistIds: [ID!]
+    zones: [ZoneInput!]
+}
+
+input UpdateEventInput {
+    name: String
+    description: String
+    type: EventType
+    date: String
+    endDate: String
+    venueId: ID
+    artistIds: [ID!]
+    zones: [ZoneInput!]
+    status: EventStatus
+}
+
+input ZoneInput {
+    id: ID
+    name: String!
+    capacity: Int!
+    price: Float!
+    section: String
+}
+
+input CreateVenueInput {
+    name: String!
+    description: String
+    address: String
+    city: String
+    country: String
+    latitude: Float
+    longitude: Float
+    totalCapacity: Int!
+    layoutType: String
+}
+
+input CreateArtistInput {
+    name: String!
+    genre: String
+    bio: String
+    imageUrl: String
+}
