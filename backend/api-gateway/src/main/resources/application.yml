@@ -2,6 +2,10 @@ spring:
   application:
     name: api-gateway
 
+  autoconfigure:
+    exclude:
+      - io.github.resilience4j.springboot3.circuitbreaker.autoconfigure.CircuitBreakerStreamEventsAutoConfiguration
+
   cloud:
     gateway:
       routes:
