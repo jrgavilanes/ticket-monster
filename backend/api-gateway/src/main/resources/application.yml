@@ -8,71 +8,73 @@ spring:
 
   cloud:
     gateway:
-      routes:
-        - id: catalog-graphql
-          uri: ${MONOLITH_URI:http://localhost:8082}
-          predicates:
-            - Path=/graphql
-          filters:
-            - name: CircuitBreaker
-              args:
-                name: catalog
-                fallbackUri: forward:/fallback/catalog
-        - id: queue-service
-          uri: ${MONOLITH_URI:http://localhost:8082}
-          predicates:
-            - Path=/api/v1/queue/**
-          filters:
-            - name: CircuitBreaker
-              args:
-                name: queue
-                fallbackUri: forward:/fallback/queue
-        - id: reservation-service
-          uri: ${MONOLITH_URI:http://localhost:8082}
-          predicates:
-            - Path=/api/v1/reservations/**
-          filters:
-            - name: CircuitBreaker
-              args:
-                name: reservation
-                fallbackUri: forward:/fallback/reservation
-        - id: payment-service
-          uri: ${MONOLITH_URI:http://localhost:8082}
-          predicates:
-            - Path=/api/v1/payments/**
-          filters:
-            - name: CircuitBreaker
-              args:
-                name: payment
-                fallbackUri: forward:/fallback/payment
+      server:
+        webflux:
+          routes:
+            - id: catalog-graphql
+              uri: ${MONOLITH_URI:http://localhost:8082}
+              predicates:
+                - Path=/graphql
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: catalog
+                    fallbackUri: forward:/fallback/catalog
+            - id: queue-service
+              uri: ${MONOLITH_URI:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/queue/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: queue
+                    fallbackUri: forward:/fallback/queue
+            - id: reservation-service
+              uri: ${MONOLITH_URI:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/reservations/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: reservation
+                    fallbackUri: forward:/fallback/reservation
+            - id: payment-service
+              uri: ${MONOLITH_URI:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/payments/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: payment
+                    fallbackUri: forward:/fallback/payment
 
-      globalcors:
-        cors-configurations:
-          '[/**]':
-            allowedOrigins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
-            allowedMethods:
-              - GET
-              - POST
-              - PUT
-              - DELETE
-              - OPTIONS
-            allowedHeaders: "*"
-            allowCredentials: true
-            maxAge: 3600
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOrigins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+                allowedMethods:
+                  - GET
+                  - POST
+                  - PUT
+                  - DELETE
+                  - OPTIONS
+                allowedHeaders: "*"
+                allowCredentials: true
+                maxAge: 3600
 
-      default-filters:
-        - name: RequestRateLimiter
-          args:
-            redis-rate-limiter.replenishRate: 100
-            redis-rate-limiter.burstCapacity: 200
-            key-resolver: "#{@userKeyResolver}"
+          default-filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 100
+                redis-rate-limiter.burstCapacity: 200
+                key-resolver: "#{@userKeyResolver}"
 
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/ticket-monster}
-          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/ticket-monster/protocol/openid-connect/certs}
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/ticket-monster}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/ticket-monster/protocol/openid-connect/certs}
 
   data:
     redis:

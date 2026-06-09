@@ -390,6 +390,10 @@ http://localhost:8180/admin (admin / admin)
 | Grafana | http://localhost:3000 |
 | Prometheus | http://localhost:9090 |
 
+## Limitaciones / Próximos Pasos
+
+- [ ] **Asignación de butacas numeradas**: Actualmente el sistema solo lleva un contador de capacidad por zona (ej: "Pista: 40000 disponibles"). Al reservar N entradas, descuenta del contador pero no asigna números de butaca específicos. Pendiente implementar numeración secuencial: `reserved_seats = [capacity - available + 1 .. capacity - available + quantity]`. Afecta al modelo `ReservationItem`, la respuesta de la API y las cancelaciones (reutilización de números).
+
 ## Provisioning (Remote K3s)
 
 ```bash

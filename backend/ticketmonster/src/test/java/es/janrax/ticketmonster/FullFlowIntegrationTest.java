@@ -255,13 +255,6 @@ class FullFlowIntegrationTest {
 		assertThat(eventId).isNotEmpty();
 		assertThat(eventName).isEqualTo("La Renga en el Monumental");
 
-		for (Map<String, Object> zone : zones) {
-			String zId = (String) zone.get("id");
-			int capacity = (int) zone.get("capacity");
-			jdbc.update("INSERT INTO reservation.zone_stock (event_id, zone_id, total_capacity, available_count) VALUES (?, ?, ?, ?)",
-					eventId, zId, capacity, capacity);
-		}
-
 		System.out.println("\n=== EVENT CREATED ===");
 		System.out.println("ID: " + eventId);
 		System.out.println("Zone (Campo) ID: " + zoneId);
