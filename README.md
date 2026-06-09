@@ -406,3 +406,54 @@ http://localhost:8180/admin (admin / admin)
 # 3. Deploy application + run tests
 ./scripts/provision-services.sh -u user@host -d domain.com
 ```
+
+ejemplos de llamadas. BORRAR ----
+```sh
+1394  ADMIN_TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=ticket-monster-app" \
+  -d "username=admin" -d "password=admin" \
+  -d "grant_type=password" | jq -r '.access_token')
+ 1395  curl -s http://localhost:8080/graphql   -H "Authorization: Bearer $ADMIN_TOKEN"   -H "Content-Type: application/json"   -d '{"query":"mutation { createArtist(input: { name: \"Foo Fighters\", genre: \"Rock\" }) { id name } }"}' | jq .
+ 1396  VENUE_RESP=$(curl -s http://localhost:8080/graphql \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"mutation { createVenue(input: { name: \"Wembley\", totalCapacity: 90000 }) { id name } }"}')
+ 1397  VENUE_ID=$(echo "$VENUE_RESP" | jq -r '.data.createVenue.id')
+ 1398  echo "VENUE_ID=$VENUE_ID"
+ 1399  EVENT_RESP=$(curl -s http://localhost:8080/graphql \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"query\":\"mutation { createEvent(input: { name: \\\"Foo Fighters Live\\\", type: CONCERT, date: \\\"2025-12-25T22:00:00\\\", venueId: \\\"$VENUE_ID\\\", zones: [{ name: \\\"Pista\\\", capacity: 40000, price: 80.0 }, { name: \\\"Grada\\\", capacity: 30000, price: 120.0 }] }) { id name status zones { id name capacity price } } }\"}")
+ 1400  EVENT_ID=$(echo "$EVENT_RESP" | jq -r '.data.createEvent.id')
+ 1401  ZONE_ID=$(echo "$EVENT_RESP" | jq -r '.data.createEvent.zones[0].id')
+ 1402  echo "EVENT_ID=$EVENT_ID  ZONE_ID_PISTA=$ZONE_ID"
+ 1403  curl -s http://localhost:8080/graphql   -H "Authorization: Bearer $ADMIN_TOKEN"   -H "Content-Type: application/json"   -d "{\"query\":\"mutation { updateEvent(id: \\\"$EVENT_ID\\\", input: { status: PUBLISHED }) { id name status } }\"}" | jq .
+ 1404  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d '{"query":"{ events(page:0, size:10) { content { id name venue { name } zones { id name capacity price } } } }"}' | jq .
+ 1405  USER_TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=ticket-monster-app" \
+  -d "username=user" -d "password=user" \
+  -d "grant_type=password" | jq -r '.access_token')
+ 1406  curl -s -X POST "http://localhost:8080/api/v1/queue/$EVENT_ID/join"   -H "Authorization: Bearer $USER_TOKEN"   -H "Content-Type: application/json" | jq .
+ 1407  curl -s "http://localhost:8080/api/v1/queue/$EVENT_ID/status"   -H "Authorization: Bearer $USER_TOKEN" | jq .
+ 1408  curl -s "http://localhost:8080/api/v1/queue/$EVENT_ID/token"   -H "Authorization: Bearer $USER_TOKEN" | jq .
+ 1409  RESERVATION=$(curl -s -X POST "http://localhost:8080/api/v1/reservations" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"eventId\":\"$EVENT_ID\",\"items\":[{\"zoneId\":\"$ZONE_ID\",\"quantity\":2}]}")
+ 1410  RESERVATION_ID=$(echo "$RESERVATION" | jq -r '.id')
+ 1411  echo "RESERVATION_ID=$RESERVATION_ID"
+ 1412  PAYMENT=$(curl -s -X POST "http://localhost:8080/api/v1/payments" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"reservationId\":\"$RESERVATION_ID\",\"amount\":160.0}")
+ 1413  PAYMENT_ID=$(echo "$PAYMENT" | jq -r '.id')
+ 1414  echo "PAYMENT_ID=$PAYMENT_ID"
+ 1415  curl -s -X POST "http://localhost:8080/api/v1/payments/$PAYMENT_ID/confirm"   -H "Authorization: Bearer $USER_TOKEN"   -H "Content-Type: application/json"   -d "{\"idempotencyKey\":\"test-$(date +%s)\"}" | jq .
+ 1416  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d "{\"query\":\"{ availability(eventId: \\\"$EVENT_ID\\\") { zoneName totalCapacity reservedCount availableCount } }\"}" | jq .
+ 1417  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d '{"query":"mutation { deleteEvent(id: \"x\") }"}' | jq .
+
+
+
+```
