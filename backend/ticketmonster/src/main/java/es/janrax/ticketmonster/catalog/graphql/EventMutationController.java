@@ -1,5 +1,6 @@
 package es.janrax.ticketmonster.catalog.graphql;
 
+import es.janrax.ticketmonster.catalog.event.ZonesModifiedEvent;
 import es.janrax.ticketmonster.catalog.model.Artist;
 import es.janrax.ticketmonster.catalog.model.Event;
 import es.janrax.ticketmonster.catalog.model.Venue;
@@ -7,6 +8,7 @@ import es.janrax.ticketmonster.catalog.model.Zone;
 import es.janrax.ticketmonster.catalog.repository.ArtistRepository;
 import es.janrax.ticketmonster.catalog.repository.EventRepository;
 import es.janrax.ticketmonster.catalog.repository.VenueRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.graphql.data.method.annotation.Argument;
 import org.springframework.graphql.data.method.annotation.MutationMapping;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,11 +26,13 @@ public class EventMutationController {
 	private final EventRepository eventRepository;
 	private final VenueRepository venueRepository;
 	private final ArtistRepository artistRepository;
+	private final ApplicationEventPublisher eventPublisher;
 
-	public EventMutationController(EventRepository eventRepository, VenueRepository venueRepository, ArtistRepository artistRepository) {
+	public EventMutationController(EventRepository eventRepository, VenueRepository venueRepository, ArtistRepository artistRepository, ApplicationEventPublisher eventPublisher) {
 		this.eventRepository = eventRepository;
 		this.venueRepository = venueRepository;
 		this.artistRepository = artistRepository;
+		this.eventPublisher = eventPublisher;
 	}
 
 	@MutationMapping
@@ -46,8 +50,9 @@ public class EventMutationController {
 		if (input.artistIds() != null) {
 			event.setArtistIds(input.artistIds());
 		}
+		List<Zone> zoneList = null;
 		if (input.zones() != null) {
-			event.setZones(input.zones().stream()
+			zoneList = input.zones().stream()
 					.map(z -> new Zone(
 							z.id() != null ? z.id() : UUID.randomUUID().toString(),
 							z.name(),
@@ -55,9 +60,18 @@ public class EventMutationController {
 							BigDecimal.valueOf(z.price()),
 							z.section()
 					))
-					.toList());
+					.toList();
+			event.setZones(zoneList);
 		}
-		return eventRepository.save(event);
+		Event saved = eventRepository.save(event);
+		if (zoneList != null) {
+			eventPublisher.publishEvent(new ZonesModifiedEvent(
+					saved.getId(),
+					ZonesModifiedEvent.Action.CREATED,
+					zoneList.stream().map(z -> new ZonesModifiedEvent.ZoneData(z.getId(), z.getName(), z.getCapacity())).toList()
+			));
+		}
+		return saved;
 	}
 
 	@MutationMapping
@@ -73,8 +87,9 @@ public class EventMutationController {
 		if (input.venueId() != null) event.setVenueId(input.venueId());
 		if (input.artistIds() != null) event.setArtistIds(input.artistIds());
 		if (input.status() != null) event.setStatus(input.status());
+		List<Zone> updatedZones = null;
 		if (input.zones() != null) {
-			event.setZones(input.zones().stream()
+			updatedZones = input.zones().stream()
 					.map(z -> new Zone(
 							z.id() != null ? z.id() : UUID.randomUUID().toString(),
 							z.name(),
@@ -82,15 +97,25 @@ public class EventMutationController {
 							BigDecimal.valueOf(z.price()),
 							z.section()
 					))
-					.toList());
+					.toList();
+			event.setZones(updatedZones);
 		}
 		event.setUpdatedAt(LocalDateTime.now());
-		return eventRepository.save(event);
+		Event saved = eventRepository.save(event);
+		if (updatedZones != null) {
+			eventPublisher.publishEvent(new ZonesModifiedEvent(
+					saved.getId(),
+					ZonesModifiedEvent.Action.UPDATED,
+					updatedZones.stream().map(z -> new ZonesModifiedEvent.ZoneData(z.getId(), z.getName(), z.getCapacity())).toList()
+			));
+		}
+		return saved;
 	}
 
 	@MutationMapping
 	public boolean deleteEvent(@Argument String id) {
 		eventRepository.deleteById(id);
+		eventPublisher.publishEvent(new ZonesModifiedEvent(id, ZonesModifiedEvent.Action.DELETED, List.of()));
 		return true;
 	}
 

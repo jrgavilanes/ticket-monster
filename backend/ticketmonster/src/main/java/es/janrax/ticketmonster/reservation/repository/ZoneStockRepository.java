@@ -19,6 +19,8 @@ public interface ZoneStockRepository extends JpaRepository<ZoneStock, Long> {
 
 	List<ZoneStock> findByEventId(String eventId);
 
+	void deleteByEventId(String eventId);
+
 	@Modifying
 	@Query("UPDATE ZoneStock z SET z.availableCount = z.availableCount + :quantity WHERE z.eventId = :eventId AND z.zoneId = :zoneId")
 	int incrementStock(@Param("eventId") String eventId, @Param("zoneId") String zoneId, @Param("quantity") int quantity);
