@@ -390,9 +390,77 @@ http://localhost:8180/admin (admin / admin)
 | Grafana | http://localhost:3000 |
 | Prometheus | http://localhost:9090 |
 
+## Frontend CLI
+
+Emulador interactivo por terminal que consume la API de Ticket Monster. Permite hacer los recorridos completos de administración y compra sin escribir curl manualmente.
+
+### Prerequisitos
+
+- `curl` (obligatorio)
+- `jq` (opcional, mejora el formato de salida JSON)
+
+### Uso
+
+```bash
+./frontend/frontend.sh <usuario> <password> [-v]
+```
+
+- `-v`: Muestra el comando curl equivalente antes de ejecutar cada llamada (modo verbose).
+
+El script detecta automáticamente si eres administrador o usuario regular y muestra el menú correspondiente.
+
+### Usuarios de prueba
+
+| Usuario | Password | Roles | Menú |
+|---------|----------|-------|------|
+| `admin` | `admin` | ADMIN, USER | Crear artista/venue/evento, publicar, listar, disponibilidad |
+| `user` | `user` | USER | Listar eventos, disponibilidad, comprar entradas, pagar |
+
+### URLs configurables
+
+Edita las variables al inicio de `frontend/frontend.sh`:
+
+```bash
+KEYCLOAK_URL="http://localhost:8180"
+GATEWAY_URL="http://localhost:8080"
+MONOLITH_URL="http://localhost:8082"
+```
+
+El script usa `GATEWAY_URL` primero; si no responde, prueba `MONOLITH_URL` automáticamente.
+
+### Health check automático
+
+Al ejecutar, el script verifica que Keycloak y el backend responden. Primero intenta con API Gateway (`:8080`); si no está disponible, prueba con el monolith directo (`:8082`). Si ninguno responde, muestra cómo levantar el entorno.
+
+### Ejemplo: Sesión administrador
+
+```bash
+./frontend/frontend.sh admin admin
+
+# 1. Crear Artista  →  Foo Fighters, Rock
+# 2. Crear Venue    →  Wembley, 90000
+# 3. Crear Evento   →  Foo Fighters Live, CONCERT, venueId anterior, zonas: Pista 40000x80 + Grada 30000x120
+# 4. Publicar Evento → eventId anterior
+# 5. Listar Eventos → muestra el evento creado
+```
+
+### Ejemplo: Sesión usuario
+
+```bash
+./frontend/frontend.sh user user
+
+# 1. Listar Eventos → elegir un evento
+# 3. Comprar entradas → eventId, se une a cola, espera turno, zonaId, cantidad
+# 4. Pagar reserva → reservationId, monto
+```
+
 ## Limitaciones / Próximos Pasos
 
 - [ ] **Asignación de butacas numeradas**: Actualmente el sistema solo lleva un contador de capacidad por zona (ej: "Pista: 40000 disponibles"). Al reservar N entradas, descuenta del contador pero no asigna números de butaca específicos. Pendiente implementar numeración secuencial: `reserved_seats = [capacity - available + 1 .. capacity - available + quantity]`. Afecta al modelo `ReservationItem`, la respuesta de la API y las cancelaciones (reutilización de números).
+- [ ] **Manejo amigable de excepciones**: Actualmente las excepciones no controladas (ej: `LazyInitializationException`, `IllegalArgumentException`, formato inválido) devuelven 500 con un JSON genérico. Implementar un `@ControllerAdvice` global que:
+  - Capture excepciones comunes y devuelva respuestas con mensajes legibles para el usuario (en español o inglés según el locale)
+  - Registre el error completo en los logs estructurados para observabilidad (Loki + Tempo traceId)
+  - Exponga el traceId en la respuesta al cliente para correlación
 
 ## Provisioning (Remote K3s)
 

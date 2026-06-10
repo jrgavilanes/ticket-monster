@@ -11,6 +11,7 @@ import es.janrax.ticketmonster.reservation.service.ReservationNotActiveException
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -47,6 +48,7 @@ public class ReservationController {
 	}
 
 	@GetMapping("/{id}")
+	@Transactional(readOnly = true)
 	public ResponseEntity<?> getReservation(
 			@PathVariable String id,
 			@AuthenticationPrincipal Jwt jwt) {
