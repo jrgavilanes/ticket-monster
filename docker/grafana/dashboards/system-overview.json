@@ -11,7 +11,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "targets": [{
-        "expr": "rate(http_server_requests_seconds_count[5m])",
+        "expr": "rate(http_server_requests_seconds_count[1m])",
         "legendFormat": "{{uri}} {{method}}"
       }],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
@@ -21,7 +21,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "targets": [{
-        "expr": "rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])",
+        "expr": "rate(http_server_requests_seconds_count{status=~\"5..\"}[1m])",
         "legendFormat": "{{uri}} {{status}}"
       }],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
@@ -31,9 +31,9 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
-        { "expr": "histogram_quantile(0.50, rate(http_server_requests_seconds_bucket[5m]))", "legendFormat": "p50" },
-        { "expr": "histogram_quantile(0.95, rate(http_server_requests_seconds_bucket[5m]))", "legendFormat": "p95" },
-        { "expr": "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket[5m]))", "legendFormat": "p99" }
+        { "expr": "histogram_quantile(0.50, rate(http_server_requests_seconds_bucket[1m]))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, rate(http_server_requests_seconds_bucket[1m]))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket[1m]))", "legendFormat": "p99" }
       ],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
     },
@@ -49,10 +49,10 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
       "targets": [
-        { "expr": "rate(reservations_created_total[5m])", "legendFormat": "Created" },
-        { "expr": "rate(reservations_expired_total[5m])", "legendFormat": "Expired" },
-        { "expr": "rate(reservations_confirmed_total[5m])", "legendFormat": "Confirmed" },
-        { "expr": "rate(reservations_cancelled_total[5m])", "legendFormat": "Cancelled" }
+        { "expr": "rate(reservations_created_total[1m])", "legendFormat": "Created" },
+        { "expr": "rate(reservations_expired_total[1m])", "legendFormat": "Expired" },
+        { "expr": "rate(reservations_confirmed_total[1m])", "legendFormat": "Confirmed" },
+        { "expr": "rate(reservations_cancelled_total[1m])", "legendFormat": "Cancelled" }
       ],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
     },

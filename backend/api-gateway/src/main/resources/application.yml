@@ -10,43 +10,12 @@ spring:
     gateway:
       server:
         webflux:
-          routes:
-            - id: catalog-graphql
-              uri: ${MONOLITH_URI:http://localhost:8082}
-              predicates:
-                - Path=/graphql
-              filters:
-                - name: CircuitBreaker
-                  args:
-                    name: catalog
-                    fallbackUri: forward:/fallback/catalog
-            - id: queue-service
-              uri: ${MONOLITH_URI:http://localhost:8082}
-              predicates:
-                - Path=/api/v1/queue/**
-              filters:
-                - name: CircuitBreaker
-                  args:
-                    name: queue
-                    fallbackUri: forward:/fallback/queue
-            - id: reservation-service
-              uri: ${MONOLITH_URI:http://localhost:8082}
-              predicates:
-                - Path=/api/v1/reservations/**
-              filters:
-                - name: CircuitBreaker
-                  args:
-                    name: reservation
-                    fallbackUri: forward:/fallback/reservation
-            - id: payment-service
-              uri: ${MONOLITH_URI:http://localhost:8082}
-              predicates:
-                - Path=/api/v1/payments/**
-              filters:
-                - name: CircuitBreaker
-                  args:
-                    name: payment
-                    fallbackUri: forward:/fallback/payment
+          httpclient:
+            pool:
+              max-connections: 500
+              acquire-timeout: 5000
+              max-idle-time: 60s
+              max-life-time: 120s
 
           globalcors:
             cors-configurations:
@@ -65,8 +34,8 @@ spring:
           default-filters:
             - name: RequestRateLimiter
               args:
-                redis-rate-limiter.replenishRate: 100
-                redis-rate-limiter.burstCapacity: 200
+                redis-rate-limiter.replenishRate: 1000
+                redis-rate-limiter.burstCapacity: 2000
                 key-resolver: "#{@userKeyResolver}"
 
   security:

@@ -390,6 +390,138 @@ http://localhost:8180/admin (admin / admin)
 | Grafana | http://localhost:3000 |
 | Prometheus | http://localhost:9090 |
 
+## Observabilidad
+
+El stack de observabilidad usa **LGTM** (Loki, Grafana, Tempo, Metrics/Prometheus).
+
+### Acceso
+
+| Servicio | URL | Credenciales |
+|----------|-----|-------------|
+| Grafana | http://localhost:3000 | admin / admin |
+| Prometheus | http://localhost:9090 | — |
+| Tempo | http://localhost:3200 | — |
+| Loki | http://localhost:3100 | — |
+
+### Dashboards preconfigurados
+
+- **Ticket Monster - System Overview** (`uid: ticket-monster-overview`): request rate, error rate, latencias (p50/p95/p99), reservas activas, JVM memory, HikariCP connections
+- **Ticket Monster - Reservation Module** (`uid: ticket-monster-reservation`): creación/expiración de reservas, latencia PostgreSQL, latencia Redis
+
+### Métricas (Prometheus)
+
+Los servicios exponen métricas via Spring Boot Actuator en `/actuator/prometheus`. Prometheus (`docker/prometheus/prometheus.yml`) escrapea automáticamente:
+
+| Job | Target | Métricas path |
+|-----|--------|--------------|
+| `ticketmonster` | `172.17.0.1:8082` | `/actuator/prometheus` |
+| `api-gateway` | `172.17.0.1:8080` | `/actuator/prometheus` |
+
+> **Nota**: Cuando los servicios corren desde IntelliJ (no Docker), Prometheus los escrapea via `172.17.0.1` (gateway del bridge Docker). Si Prometheus no ve los targets, reinicia el contenedor: `docker compose restart prometheus`.
+
+### Logs (Loki)
+
+Cuando los servicios corren desde **IntelliJ**, los logs del monolith se envían a Loki mediante un appender Logback (`com.github.loki4j.logback.Loki4jAppender`) configurado en `logback-spring.xml`. El appender envía logs estructurados en JSON a `http://localhost:3100/loki/api/v1/push`.
+
+En Grafana → Explore → selecciona **Loki**, query:
+```
+{app="ticketmonster"}
+```
+
+Los logs incluyen `trace_id` y `span_id` en el MDC cuando el agente OpenTelemetry está activo, permitiendo correlación log→traza en Tempo.
+
+### Trazas (Tempo)
+
+El agente **OpenTelemetry Java** instrumenta automáticamente el código y envía trazas distribuidas a Tempo via OTLP (`http://localhost:4318`).
+
+**Configuración en IntelliJ** (VM options del run config):
+```
+-javaagent:/ruta/al/proyecto/backend/otel/opentelemetry-javaagent.jar
+-Dotel.service.name=ticketmonster
+-Dotel.exporter.otlp.endpoint=http://localhost:4318
+-Dotel.metrics.exporter=none
+```
+
+El proyecto incluye run configurations preconfiguradas en `.idea/runConfigurations/` con estas opciones.
+
+En Grafana → Explore → selecciona **Tempo** para buscar trazas, o usa el panel "Reservation Events" en el dashboard System Overview para navegar desde una métrica a la traza correspondiente.
+
+### Troubleshooting
+
+| Síntoma | Causa | Solución |
+|---------|-------|----------|
+| Dashboards vacíos | Datasource Prometheus sin `uid: prometheus` fijo | Añadir `uid: prometheus` en `docker/grafana/provisioning/datasources/datasources.yml` y reiniciar Grafana |
+| No hay métricas | Prometheus escrapea nombres Docker (`ticketmonster:8082`) pero los servicios corren en host | Cambiar targets a `172.17.0.1:8082` en `docker/prometheus/prometheus.yml` |
+| No hay logs en Loki | Los servicios corren desde IntelliJ sin appender Loki | Añadir `com.github.loki4j:loki-logback-appender` y configurar `logback-spring.xml` |
+| No hay trazas en Tempo | OTEL agent no cargado, o Tempo no corre | Verificar VM options en IntelliJ run config; `docker compose up -d tempo` |
+| Gateway devuelve 405 bajo carga | Rutas definidas en YAML (`spring.cloud.gateway.server.webflux.routes`) no resuelven correctamente con alta concurrencia | Usar `RouteLocator` programático (ver `RouteConfig.java`) en lugar de YAML |
+| Gateway no encuentra rutas (404) | Prefijo de propiedades incorrecto | El prefijo correcto es `spring.cloud.gateway.server.webflux` (confirmado en bytecode de `GatewayProperties` para `spring-cloud-gateway-server-webflux:5.0.1`) |
+
+---
+
+## Load Testing
+
+Los tests de carga usan [k6](https://k6.io/) y están en `deploy/tests/k6/`.
+
+### Tests disponibles
+
+| Script | VUs | Duración | Descripción | Thresholds |
+|--------|-----|----------|-------------|------------|
+| `catalog-read.js` | 100 | 30s | Consultas GraphQL de eventos y disponibilidad | p95 < 2s, error < 1% |
+| `queue-load.js` | 10000 | 30s | Stress test de cola virtual | p95 < 2s, error < 1% |
+| `e2e-purchase.js` | 500 | 120s | Flujo completo de compra | p95 < 5s, error < 5% |
+| `reservation-contention.js` | 1000 iter. | — | Creación concurrente de reservas | p95 < 5s |
+
+### Ejecutar tests
+
+```bash
+# Catalog read (100 VUs, 30s) — ideal para probar el gateway + monolith
+docker run --rm --network host \
+  -v $(pwd)/deploy/tests/k6:/scripts \
+  grafana/k6 run /scripts/catalog-read.js
+
+# Queue load (estrés de cola virtual)
+docker run --rm --network host \
+  -v $(pwd)/deploy/tests/k6:/scripts \
+  grafana/k6 run /scripts/queue-load.js
+
+# E2E purchase (requiere EVENT_ID y AUTH_TOKEN)
+docker run --rm --network host \
+  -v $(pwd)/deploy/tests/k6:/scripts \
+  -e BASE_URL=http://localhost:8080 \
+  -e EVENT_ID=test-event-1 \
+  -e AUTH_TOKEN="<token>" \
+  grafana/k6 run /scripts/e2e-purchase.js
+```
+
+### Ver resultados en Grafana
+
+Durante y después del test:
+
+1. **Dashboard System Overview**: request rate, latencias, errores, JVM, conexiones HikariCP
+2. **Explore → Prometheus**: queries ad-hoc como `rate(http_server_requests_seconds_count[1m])`
+3. **Explore → Loki**: logs del monolith: `{app="ticketmonster"}`
+4. **Explore → Tempo**: trazas generadas durante el test
+
+> **Nota**: Los dashboards usan `[1m]` en las queries de rate. Si ejecutas tests muy cortos (<1 min), puede que no haya datos suficientes para calcular el rate. Usa `--duration 1m30s` para tests mínimos.
+
+### Gateway vs Monolith directo
+
+Los tests de carga pueden apuntar al **API Gateway** (`localhost:8080`) o directamente al **monolith** (`localhost:8082`):
+
+- **Via gateway**: incluye rate limiting, autenticación y circuit breakers. Es el escenario real. Recomendado para tests funcionales.
+- **Directo al monolith**: esquiva el gateway. Útil para aislar el rendimiento del backend o cuando el gateway tiene problemas (ej: el 405 bajo carga debido a rutas YAML—ver sección de troubleshooting).
+
+El script `catalog-read.js` usa `BASE_URL=http://localhost:8080` por defecto. Cambia a `http://localhost:8082` si quieres saltar el gateway:
+```bash
+docker run --rm --network host \
+  -v $(pwd)/deploy/tests/k6:/scripts \
+  -e BASE_URL=http://localhost:8082 \
+  grafana/k6 run /scripts/catalog-read.js
+```
+
+---
+
 ## Frontend CLI
 
 Emulador interactivo por terminal que consume la API de Ticket Monster. Permite hacer los recorridos completos de administración y compra sin escribir curl manualmente.
@@ -475,53 +607,3 @@ Al ejecutar, el script verifica que Keycloak y el backend responden. Primero int
 ./scripts/provision-services.sh -u user@host -d domain.com
 ```
 
-ejemplos de llamadas. BORRAR ----
-```sh
-1394  ADMIN_TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=ticket-monster-app" \
-  -d "username=admin" -d "password=admin" \
-  -d "grant_type=password" | jq -r '.access_token')
- 1395  curl -s http://localhost:8080/graphql   -H "Authorization: Bearer $ADMIN_TOKEN"   -H "Content-Type: application/json"   -d '{"query":"mutation { createArtist(input: { name: \"Foo Fighters\", genre: \"Rock\" }) { id name } }"}' | jq .
- 1396  VENUE_RESP=$(curl -s http://localhost:8080/graphql \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"mutation { createVenue(input: { name: \"Wembley\", totalCapacity: 90000 }) { id name } }"}')
- 1397  VENUE_ID=$(echo "$VENUE_RESP" | jq -r '.data.createVenue.id')
- 1398  echo "VENUE_ID=$VENUE_ID"
- 1399  EVENT_RESP=$(curl -s http://localhost:8080/graphql \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"query\":\"mutation { createEvent(input: { name: \\\"Foo Fighters Live\\\", type: CONCERT, date: \\\"2025-12-25T22:00:00\\\", venueId: \\\"$VENUE_ID\\\", zones: [{ name: \\\"Pista\\\", capacity: 40000, price: 80.0 }, { name: \\\"Grada\\\", capacity: 30000, price: 120.0 }] }) { id name status zones { id name capacity price } } }\"}")
- 1400  EVENT_ID=$(echo "$EVENT_RESP" | jq -r '.data.createEvent.id')
- 1401  ZONE_ID=$(echo "$EVENT_RESP" | jq -r '.data.createEvent.zones[0].id')
- 1402  echo "EVENT_ID=$EVENT_ID  ZONE_ID_PISTA=$ZONE_ID"
- 1403  curl -s http://localhost:8080/graphql   -H "Authorization: Bearer $ADMIN_TOKEN"   -H "Content-Type: application/json"   -d "{\"query\":\"mutation { updateEvent(id: \\\"$EVENT_ID\\\", input: { status: PUBLISHED }) { id name status } }\"}" | jq .
- 1404  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d '{"query":"{ events(page:0, size:10) { content { id name venue { name } zones { id name capacity price } } } }"}' | jq .
- 1405  USER_TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=ticket-monster-app" \
-  -d "username=user" -d "password=user" \
-  -d "grant_type=password" | jq -r '.access_token')
- 1406  curl -s -X POST "http://localhost:8080/api/v1/queue/$EVENT_ID/join"   -H "Authorization: Bearer $USER_TOKEN"   -H "Content-Type: application/json" | jq .
- 1407  curl -s "http://localhost:8080/api/v1/queue/$EVENT_ID/status"   -H "Authorization: Bearer $USER_TOKEN" | jq .
- 1408  curl -s "http://localhost:8080/api/v1/queue/$EVENT_ID/token"   -H "Authorization: Bearer $USER_TOKEN" | jq .
- 1409  RESERVATION=$(curl -s -X POST "http://localhost:8080/api/v1/reservations" \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"eventId\":\"$EVENT_ID\",\"items\":[{\"zoneId\":\"$ZONE_ID\",\"quantity\":2}]}")
- 1410  RESERVATION_ID=$(echo "$RESERVATION" | jq -r '.id')
- 1411  echo "RESERVATION_ID=$RESERVATION_ID"
- 1412  PAYMENT=$(curl -s -X POST "http://localhost:8080/api/v1/payments" \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"reservationId\":\"$RESERVATION_ID\",\"amount\":160.0}")
- 1413  PAYMENT_ID=$(echo "$PAYMENT" | jq -r '.id')
- 1414  echo "PAYMENT_ID=$PAYMENT_ID"
- 1415  curl -s -X POST "http://localhost:8080/api/v1/payments/$PAYMENT_ID/confirm"   -H "Authorization: Bearer $USER_TOKEN"   -H "Content-Type: application/json"   -d "{\"idempotencyKey\":\"test-$(date +%s)\"}" | jq .
- 1416  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d "{\"query\":\"{ availability(eventId: \\\"$EVENT_ID\\\") { zoneName totalCapacity reservedCount availableCount } }\"}" | jq .
- 1417  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d '{"query":"mutation { deleteEvent(id: \"x\") }"}' | jq .
-
-
-
-```

@@ -6,14 +6,14 @@
       "title": "Reservation Creation Rate",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "targets": [{ "expr": "rate(reservations_created_total[5m])", "legendFormat": "Created/s" }],
+      "targets": [{ "expr": "rate(reservations_created_total[1m])", "legendFormat": "Created/s" }],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
     },
     {
       "title": "Reservation Expiration Rate",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "targets": [{ "expr": "rate(reservations_expired_total[5m])", "legendFormat": "Expired/s" }],
+      "targets": [{ "expr": "rate(reservations_expired_total[1m])", "legendFormat": "Expired/s" }],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
     },
     {
@@ -21,8 +21,8 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
-        { "expr": "histogram_quantile(0.95, rate(spring_data_repository_invocations_seconds_bucket[5m]))", "legendFormat": "p95" },
-        { "expr": "histogram_quantile(0.99, rate(spring_data_repository_invocations_seconds_bucket[5m]))", "legendFormat": "p99" }
+        { "expr": "histogram_quantile(0.95, rate(spring_data_repository_invocations_seconds_bucket[1m]))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, rate(spring_data_repository_invocations_seconds_bucket[1m]))", "legendFormat": "p99" }
       ],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
     },
@@ -31,7 +31,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [{
-        "expr": "rate(spring_data_redis_command_seconds_sum[5m]) / rate(spring_data_redis_command_seconds_count[5m])",
+        "expr": "rate(spring_data_redis_command_seconds_sum[1m]) / rate(spring_data_redis_command_seconds_count[1m])",
         "legendFormat": "{{command}}"
       }],
       "datasource": { "type": "prometheus", "uid": "prometheus" }
