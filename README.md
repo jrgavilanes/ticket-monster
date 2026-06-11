@@ -621,6 +621,7 @@ Al ejecutar, el script verifica que Keycloak y el backend responden. Primero int
   - Capture excepciones comunes y devuelva respuestas con mensajes legibles para el usuario (en español o inglés según el locale)
   - Registre el error completo en los logs estructurados para observabilidad (Loki + Tempo traceId)
   - Exponga el traceId en la respuesta al cliente para correlación
+- [ ] **Dashboard Spring Boot 3.x Statistics**: El panel Database Connection Pool HikariCP no muestra datos porque el dashboard usa una variable `$Namespace` que no existe en nuestras métricas. Solución: eliminar la variable y limpiar los filtros `namespace` del JSON del dashboard (`docker/grafana/dashboards/spring-boot-statistics.json`).
 
 ## Provisioning (Remote K3s)
 
