@@ -444,6 +444,11 @@ El agente **OpenTelemetry Java** instrumenta automáticamente el código y enví
 
 El proyecto incluye run configurations preconfiguradas en `.idea/runConfigurations/` con estas opciones.
 
+**Descargar el agente** (no está incluido en el repo):
+```bash
+./scripts/download-otel-agent.sh
+```
+
 En Grafana → Explore → selecciona **Tempo** para buscar trazas, o usa el panel "Reservation Events" en el dashboard System Overview para navegar desde una métrica a la traza correspondiente.
 
 ### Troubleshooting
