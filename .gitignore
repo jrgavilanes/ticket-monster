@@ -11,3 +11,6 @@ node_modules/
 
 # OpenTelemetry Java agent (download on demand)
 backend/otel/*.jar
+
+# Accidental build artifacts at project root
+META-INF/

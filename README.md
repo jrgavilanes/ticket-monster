@@ -512,18 +512,41 @@ Durante y después del test:
 
 ### Gateway vs Monolith directo
 
-Los tests de carga pueden apuntar al **API Gateway** (`localhost:8080`) o directamente al **monolith** (`localhost:8082`):
+Los tests de carga pueden apuntar al **API Gateway** (`localhost:8080`) o directamente al **monolith** (`localhost:8082`).
 
-- **Via gateway**: incluye rate limiting, autenticación y circuit breakers. Es el escenario real. Recomendado para tests funcionales.
-- **Directo al monolith**: esquiva el gateway. Útil para aislar el rendimiento del backend o cuando el gateway tiene problemas (ej: el 405 bajo carga debido a rutas YAML—ver sección de troubleshooting).
+Resultados de pruebas locales de resistencia:
 
-El script `catalog-read.js` usa `BASE_URL=http://localhost:8080` por defecto. Cambia a `http://localhost:8082` si quieres saltar el gateway:
+| VUs | Gateway (error) | Monolith directo (error) | Monolith p95 |
+|-----|----------------|------------------------|-------------|
+| 100 | **0%** | **0%** | 10ms |
+| 500 | **98%** (405) | **0%** | 264ms |
+| 1000 | **99%** | **0%** | 705ms |
+| 2000 | **99%** | **0%** | 2s |
+| 5000 | **99%** | **0%** | 6.5s |
+
+El monolith aguanta **5000 VUs sin un solo fallo** localmente. El gateway es el cuello de botella: el `RoutePredicateHandlerMapping` de Spring Cloud Gateway no escala bajo alta concurrencia en entornos locales (el problema persiste incluso con rutas programáticas).
+
+El script `catalog-read.js` usa `BASE_URL=http://localhost:8080` por defecto. Para pruebas de rendimiento locales, usa directo al monolith:
 ```bash
 docker run --rm --network host \
   -v $(pwd)/deploy/tests/k6:/scripts \
   -e BASE_URL=http://localhost:8082 \
   grafana/k6 run /scripts/catalog-read.js
 ```
+
+#### ¿Merece la pena el Gateway?
+
+En una arquitectura de **monolito**, el API Gateway aporta menos valor porque no hay múltiples servicios que rutear. El monolith ya incluye:
+
+- **Spring Security** para autenticación JWT
+- **Resilience4j** para circuit breakers y rate limiting
+- **Actuator** para métricas y health checks
+
+El gateway existe para preparar la **evolución a microservicios** (extracción gradual de módulos del Modulith). En producción (K3s) con varios pods y balanceo de carga, el gateway escala correctamente.
+
+Para desarrollo local, lo recomendado es:
+- **Tests de carga** → directo al monolith (sin gateway de por medio)
+- **Tests funcionales** → vía gateway (para validar auth, rate limiting, etc.)
 
 ---
 
