@@ -172,8 +172,6 @@ flowchart TB
         subgraph NS1[namespace: ticket-monster]
             TM1[ticketmonster pod 1]
             TM2[ticketmonster pod 2]
-            GW1[api-gateway pod 1]
-            GW2[api-gateway pod 2]
             HPA[HPA]
         end
 
@@ -197,10 +195,8 @@ flowchart TB
         end
     end
 
-    INGRESS[Ingress<br/>nginx + TLS] --> GW1
-    INGRESS --> GW2
-    GW1 --> TM1
-    GW2 --> TM2
+    INGRESS[Ingress<br/>Traefik + TLS] --> TM1
+    INGRESS --> TM2
     TM1 --> PG
     TM1 --> MONGO
     TM1 --> REDIS
@@ -234,7 +230,7 @@ flowchart TB
 | Orquestador | K3s |
 | DB relacional | PostgreSQL |
 | DB documental | MongoDB |
-| API Gateway | Spring Cloud Gateway 2025.1.1 |
+| Edge / Ingress | K3s Traefik (rate limiting, TLS, headers) |
 | Auth | Keycloak (OAuth2 + OIDC) |
 | API Catalog | Spring for GraphQL |
 | Resiliencia | Resilience4j 2.3.0 |
@@ -466,14 +462,20 @@ Al ejecutar, el script verifica que Keycloak y el backend responden. Primero int
 
 ```bash
 # 1. Provision K3s cluster
-./scripts/provision-k3s.sh -u user@host -d domain.com
+./deploy/k3s/k3s-provision.sh janrax@janrax.es janrax.es
 
-# 2. Deploy infrastructure
-./scripts/provision-infra.sh -u user@host -d domain.com
+# 2. Deploy infrastructure + observability
+./deploy/k3s/k3s-infrastructure.sh janrax@janrax.es janrax.es
 
-# 3. Deploy application + run tests
-./scripts/provision-services.sh -u user@host -d domain.com
+# 3. Deploy the monolith
+./deploy/k3s/k3s-app.sh janrax@janrax.es janrax.es latest
+
+# Or all at once:
+./deploy/k3s/deploy.sh janrax@janrax.es janrax.es latest
 ```
+
+Images are built and pushed to GitHub Container Registry via the manual workflow:
+`.github/workflows/docker-publish.yml` → `ghcr.io/jrgavilanes/ticket-monster:<version>`.
 
 ejemplos de llamadas. BORRAR ----
 ```sh
