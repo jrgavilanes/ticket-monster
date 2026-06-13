@@ -1,0 +1,15 @@
+namespace: infrastructure
+
+image:
+  repository: mongo
+  tag: "7"
+
+user: ticketmonster
+database: ticketmonster_catalog
+
+secretName: mongodb-credentials
+rootPasswordKey: mongodb-root-password
+
+storage: 10Gi
+
+port: 27017

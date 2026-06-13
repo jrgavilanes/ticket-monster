@@ -1,0 +1,45 @@
+namespace: observability
+domain: example.com
+
+image:
+  repository: grafana/grafana
+  tag: 12.4.4
+
+adminUser: admin
+adminSecretName: grafana-credentials
+adminPasswordKey: admin-password
+
+storage: 5Gi
+
+port: 3000
+
+subPath: /panel
+
+datasources: |
+  apiVersion: 1
+
+  datasources:
+    - name: Prometheus
+      type: prometheus
+      uid: prometheus
+      access: proxy
+      url: http://prometheus.observability.svc.cluster.local:9090
+      isDefault: true
+      editable: true
+
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki.observability.svc.cluster.local:3100
+      editable: true
+
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      access: proxy
+      url: http://tempo.observability.svc.cluster.local:3200
+      editable: true
+      jsonData:
+        httpMethod: GET
+        serviceMap:
+          datasourceUid: prometheus

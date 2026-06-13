@@ -1,0 +1,25 @@
+namespace: observability
+
+image:
+  repository: prom/prometheus
+  tag: v3.9.1
+
+storage: 10Gi
+
+port: 9090
+
+retention: 7d
+
+config: |
+  global:
+    scrape_interval: 15s
+    evaluation_interval: 15s
+
+  scrape_configs:
+    - job_name: 'ticketmonster'
+      metrics_path: '/actuator/prometheus'
+      scrape_interval: 5s
+      static_configs:
+        - targets: ['ticketmonster.ticket-monster.svc.cluster.local:8082']
+          labels:
+            application: 'ticketmonster'

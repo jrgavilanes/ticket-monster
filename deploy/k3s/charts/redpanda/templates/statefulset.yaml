@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redpanda
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: redpanda
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redpanda
+  serviceName: redpanda
+  template:
+    metadata:
+      labels:
+        app: redpanda
+    spec:
+      containers:
+        - name: redpanda
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args:
+            - redpanda
+            - start
+            - --smp {{ .Values.smp }}
+            - --memory {{ .Values.memory }}
+            - --overprovisioned
+            - --kafka-addr internal://0.0.0.0:{{ .Values.port }}
+            - --advertise-kafka-addr internal://redpanda.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.port }}
+          ports:
+            - containerPort: {{ .Values.port }}
+              name: kafka
+          readinessProbe:
+            exec:
+              command: ["rpk", "cluster", "health"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.storage }}

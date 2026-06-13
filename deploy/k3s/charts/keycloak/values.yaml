@@ -1,0 +1,19 @@
+namespace: infrastructure
+domain: example.com
+
+image:
+  repository: quay.io/keycloak/keycloak
+  tag: 26.6.3
+
+adminUser: admin
+adminSecretName: keycloak-credentials
+adminPasswordKey: admin-password
+
+db:
+  url: jdbc:postgresql://postgresql.infrastructure.svc.cluster.local:5432/ticketmonster
+  username: ticketmonster
+  schema: keycloak
+  secretName: postgresql-credentials
+  passwordKey: ticketmonster-password
+
+port: 8080

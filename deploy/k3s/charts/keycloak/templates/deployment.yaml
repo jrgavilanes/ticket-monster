@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgresql -U ticketmonster -d ticketmonster; do sleep 2; done"]
+        - name: create-keycloak-schema
+          image: postgres:16-alpine
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-credentials
+                  key: ticketmonster-password
+          command: ["sh", "-c", "psql -h postgresql -U ticketmonster -d ticketmonster -c \"CREATE SCHEMA IF NOT EXISTS keycloak;\" || true"]
+      containers:
+        - name: keycloak
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args: ["start", "--import-realm"]
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: {{ .Values.db.url }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.db.username }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.secretName }}
+                  key: {{ .Values.db.passwordKey }}
+            - name: KC_DB_SCHEMA
+              value: {{ .Values.db.schema }}
+            - name: KEYCLOAK_ADMIN
+              value: {{ .Values.adminUser }}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.adminSecretName }}
+                  key: {{ .Values.adminPasswordKey }}
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HTTPS_ENABLED
+              value: "false"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_HOSTNAME_STRICT_BACKCHANNEL
+              value: "false"
+            - name: KC_HOSTNAME_URL
+              value: "https://{{ .Values.domain }}/auth"
+            - name: KC_HOSTNAME_ADMIN_URL
+              value: "https://{{ .Values.domain }}/auth"
+            - name: KC_HTTP_RELATIVE_PATH
+              value: /auth
+          ports:
+            - containerPort: {{ .Values.port }}
+              name: http
+          startupProbe:
+            tcpSocket:
+              port: {{ .Values.port }}
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.port }}
+            initialDelaySeconds: 60
+            periodSeconds: 15

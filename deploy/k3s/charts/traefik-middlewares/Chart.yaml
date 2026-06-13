@@ -1,0 +1,5 @@
+apiVersion: v2
+name: traefik-middlewares
+description: Traefik middleware CRDs for Ticket Monster
+version: 0.1.0
+type: application

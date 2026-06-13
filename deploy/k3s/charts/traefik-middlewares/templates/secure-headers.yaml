@@ -1,0 +1,15 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ticket-monster-secure-headers
+  namespace: {{ .Values.namespace }}
+spec:
+  headers:
+    browserXssFilter: {{ .Values.headers.browserXssFilter }}
+    contentTypeNosniff: {{ .Values.headers.contentTypeNosniff }}
+    frameDeny: {{ .Values.headers.frameDeny }}
+    stsSeconds: {{ .Values.headers.stsSeconds }}
+    stsIncludeSubdomains: {{ .Values.headers.stsIncludeSubdomains }}
+    stsPreload: {{ .Values.headers.stsPreload }}
+    forceSTSHeader: {{ .Values.headers.forceSTSHeader }}
+    customFrameOptionsValue: {{ .Values.headers.customFrameOptionsValue }}

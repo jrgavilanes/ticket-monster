@@ -1,0 +1,6 @@
+apiVersion: v2
+name: keycloak
+description: Keycloak identity provider for Ticket Monster
+version: 0.1.0
+appVersion: "26.6.3"
+type: application

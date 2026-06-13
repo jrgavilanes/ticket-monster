@@ -1,0 +1,9 @@
+namespace: infrastructure
+
+image:
+  repository: redis
+  tag: 7-alpine
+
+storage: 5Gi
+
+port: 6379

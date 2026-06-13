@@ -89,7 +89,8 @@ else
   step \"Instalando Cert-Manager...\"
   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
   echo \"  Esperando pods de Cert-Manager...\"
-  kubectl wait --namespace cert-manager --for=condition=ready pod --all --timeout=90s
+  while [ \"\$(kubectl get pods -n cert-manager --no-headers 2>/dev/null | wc -l)\" -eq 0 ]; do sleep 2; done
+  kubectl wait --namespace cert-manager --for=condition=ready pod --all --timeout=120s
   ok \"Cert-Manager listo\"
 fi
 
