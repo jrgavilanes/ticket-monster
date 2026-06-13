@@ -468,7 +468,7 @@ Al ejecutar, el script verifica que Keycloak y el backend responden. Primero int
 ./deploy/k3s/k3s-infrastructure.sh janrax@janrax.es janrax.es
 
 # 3. Deploy the monolith
-./deploy/k3s/k3s-app.sh janrax@janrax.es janrax.es latest
+./deploy/k3s/k3s-publish-app.sh janrax@janrax.es janrax.es latest
 
 # Or all at once:
 ./deploy/k3s/deploy.sh janrax@janrax.es janrax.es latest

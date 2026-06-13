@@ -16,11 +16,12 @@ USER=$(echo "$TARGET" | cut -d'@' -f1)
 HOST=$(echo "$TARGET" | cut -d'@' -f2)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHART_DIR="$SCRIPT_DIR/../charts/ticketmonster"
+CHART_DIR="$SCRIPT_DIR/charts/ticketmonster"
 
 echo "==> Deploying ticketmonster (tag: ${TAG}) to ${HOST}..."
 
-scp -r "$CHART_DIR" "$USER@$HOST:/tmp/ticketmonster-chart"
+ssh "$USER@$HOST" "rm -rf /tmp/ticketmonster-chart && mkdir -p /tmp/ticketmonster-chart"
+scp -r "$CHART_DIR"/* "$USER@$HOST:/tmp/ticketmonster-chart/"
 
 ssh -t "$USER@$HOST" "cat > /tmp/app-$$.sh << 'APP_SCRIPT'
 #!/bin/bash
@@ -28,9 +29,14 @@ set -euo pipefail
 DOMAIN=\$1
 TAG=\$2
 
+step() { echo -e \"\\n\\033[1;34m▶ \$1\\033[0m\"; }
+ok()   { echo -e \"\\033[1;32m  ✓ \$1\\033[0m\"; }
+
+trap 'echo -e \"\\n\\033[1;31m✗ Error en la línea \$LINENO\\033[0m\"' ERR
+
 export KUBECONFIG=\$HOME/.kube/config
 
-echo \"==> Installing/upgrading ticketmonster Helm chart (tag: \${TAG})...\"
+step \"Installing/upgrading ticketmonster Helm chart (tag: \${TAG})...\"
 
 helm upgrade --install ticketmonster /tmp/ticketmonster-chart \
     --namespace ticket-monster \
@@ -38,19 +44,26 @@ helm upgrade --install ticketmonster /tmp/ticketmonster-chart \
     --set ingress.host=\"\${DOMAIN}\" \
     --wait --timeout 5m
 
-echo \"==> Waiting for pods to be ready...\"
+ok \"Helm: ticketmonster (tag: \${TAG})\"
+
+step \"Waiting for pods to be ready...\"
 kubectl wait --namespace ticket-monster \
     --for=condition=ready pod \
     --selector app=ticketmonster \
     --timeout=120s
 
-echo \"==> Smoke test...\"
-sleep 5
-HTTP_CODE=\$(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8082/actuator/health)
+ok \"Pods ready\"
+
+step \"Smoke test...\"
+for i in \$(seq 1 12); do
+    HTTP_CODE=\$(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8082/actuator/health 2>/dev/null || echo \"000\")
+    if [ \"\$HTTP_CODE\" = \"200\" ]; then break; fi
+    sleep 5
+done
 if [ \"\$HTTP_CODE\" = \"200\" ]; then
-    echo -e \"  \\033[1;32m✓ Health check: \${HTTP_CODE}\\033[0m\"
+    ok \"Health check: \${HTTP_CODE}\"
 else
-    echo -e \"  \\033[1;31m✗ Health check: \${HTTP_CODE}\\033[0m\"
+    echo -e \"  \\033[1;31m✗ Health check: \${HTTP_CODE} (tras 60s)\\033[0m\"
 fi
 
 rm -rf /tmp/ticketmonster-chart

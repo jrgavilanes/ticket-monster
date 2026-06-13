@@ -38,7 +38,8 @@ CHARTS=/tmp/k3s-charts
 gen_secret() {
     local name=\"\$1\" ns=\"\$2\"; shift 2
     if kubectl get secret \"\$name\" -n \"\$ns\" &>/dev/null; then
-        skip \"Secret \$name (\$ns)\"; return 0
+        skip \"Secret \$name (\$ns)\"
+        return 0
     fi
     local args=()
     for p in \"\$@\"; do
@@ -57,7 +58,7 @@ copy_secret() {
     fi
     kubectl get secret \"\$name\" -n \"\$from\" -o json \
         | sed \"s/\\\"namespace\\\": \\\"\$from\\\"/\\\"namespace\\\": \\\"\$to\\\"/\" \
-        | kubectl apply -f -
+        | kubectl create -f -
     ok \"Secret \$name: \$from → \$to\"
 }
 
@@ -84,7 +85,15 @@ done
 # ══════════════════════════════════════════════════════════
 step \"Generando Secrets...\"
 gen_secret postgresql-credentials infrastructure postgres-password= ticketmonster-password=
+# Ensure POSTGRES_PASSWORD exists with same value as ticketmonster-password
+TPW=\$(kubectl get secret postgresql-credentials -n infrastructure -o jsonpath='{.data.ticketmonster-password}')
+kubectl patch secret postgresql-credentials -n infrastructure \
+    --patch="{\\\"data\\\":{\\\"POSTGRES_PASSWORD\\\":\\\"\${TPW}\\\"}}" 2>/dev/null || true
 gen_secret mongodb-credentials infrastructure mongodb-root-password= mongodb-password=
+# Ensure MONGO_PASSWORD exists with same value as mongodb-root-password
+MROOT=\$(kubectl get secret mongodb-credentials -n infrastructure -o jsonpath='{.data.mongodb-root-password}')
+kubectl patch secret mongodb-credentials -n infrastructure \
+    --patch="{\\\"data\\\":{\\\"MONGO_PASSWORD\\\":\\\"\${MROOT}\\\"}}" 2>/dev/null || true
 gen_secret redis-credentials infrastructure redis-password=
 gen_secret keycloak-credentials infrastructure admin-password=
 gen_secret redpanda-console-credentials infrastructure admin-password=

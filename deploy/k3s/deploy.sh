@@ -8,10 +8,10 @@ TAG="${3:-latest}"
 if [ -z "$TARGET" ] || [ -z "$DOMAIN" ]; then
     echo "Uso: $0 <usuario@host> <dominio> [version]"
     echo ""
-    echo "Despliega la aplicación completa en un VPS con K3s:"
-    echo "  1. k3s-provision.sh  — K3s, cert-manager, Let's Encrypt"
-    echo "  2. k3s-infrastructure.sh — PostgreSQL, MongoDB, Redis, Redpanda, Keycloak, Observabilidad"
-    echo "  3. k3s-app.sh — Helm install del monolith"
+echo "Despliega la aplicación completa en un VPS con K3s:"
+echo "  1. k3s-provision.sh  — K3s, cert-manager, Let's Encrypt"
+echo "  2. k3s-infrastructure.sh — PostgreSQL, MongoDB, Redis, Redpanda, Keycloak, Observabilidad"
+echo "  3. k3s-publish-app.sh — Helm install del monolith"
     echo ""
     echo "Ejemplo: $0 janrax@janrax.es janrax.es 1.0.0"
     exit 1
@@ -39,7 +39,7 @@ echo ""
 
 # 3. Application
 echo "▶ Step 3/3: Application"
-"$SCRIPT_DIR/k3s-app.sh" "$TARGET" "$DOMAIN" "$TAG"
+"$SCRIPT_DIR/k3s-publish-app.sh" "$TARGET" "$DOMAIN" "$TAG"
 echo ""
 echo "==============================================="
 echo "  ✓ Deployment complete"

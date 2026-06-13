@@ -52,7 +52,7 @@ if [[ "${RUN_TESTS_ONLY}" == "false" ]]; then
 
     echo ""
     echo "==> Deploying ticketmonster..."
-    helm upgrade --install ticketmonster "${PROJECT_DIR}/deploy/charts/ticketmonster" \
+    helm upgrade --install ticketmonster "${PROJECT_DIR}/deploy/k3s/charts/ticketmonster" \
         --namespace ticket-monster \
         --set image.repository="${REGISTRY}/ticketmonster" \
         --set image.tag=latest \
