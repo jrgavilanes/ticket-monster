@@ -30,6 +30,8 @@ spec:
           ports:
             - containerPort: {{ .Values.port }}
               name: kafka
+            - containerPort: {{ .Values.adminApiPort }}
+              name: admin
           readinessProbe:
             exec:
               command: ["rpk", "cluster", "health"]

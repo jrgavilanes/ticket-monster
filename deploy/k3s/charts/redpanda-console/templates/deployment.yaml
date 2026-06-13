@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redpanda-console
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: redpanda-console
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redpanda-console
+  template:
+    metadata:
+      labels:
+        app: redpanda-console
+    spec:
+      containers:
+        - name: redpanda-console
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: {{ .Values.port }}
+          env:
+            - name: KAFKA_BROKERS
+              value: {{ .Values.kafkaBrokers }}
+            - name: REDPANDA_ADMIN_API
+              value: http://redpanda.infrastructure.svc.cluster.local:9644
+            - name: CONSOLE_LOGIN_USER
+              value: {{ .Values.adminUser }}
+            - name: CONSOLE_LOGIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: {{ .Values.passwordKey }}

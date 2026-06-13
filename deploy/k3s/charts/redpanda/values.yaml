@@ -7,6 +7,7 @@ image:
 storage: 10Gi
 
 port: 9092
+adminApiPort: 9644
 
 smp: 1
 memory: 512M

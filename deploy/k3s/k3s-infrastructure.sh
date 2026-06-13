@@ -87,6 +87,7 @@ gen_secret postgresql-credentials infrastructure postgres-password= ticketmonste
 gen_secret mongodb-credentials infrastructure mongodb-root-password= mongodb-password=
 gen_secret redis-credentials infrastructure redis-password=
 gen_secret keycloak-credentials infrastructure admin-password=
+gen_secret redpanda-console-credentials infrastructure admin-password=
 gen_secret grafana-credentials observability admin-password=
 
 step \"Copiando Secrets a ticket-monster...\"
@@ -108,6 +109,10 @@ helm_install redis \"\$CHARTS/redis\" infrastructure
 
 step \"Deploying Redpanda...\"
 helm_install redpanda \"\$CHARTS/redpanda\" infrastructure
+
+step \"Deploying Redpanda Console...\"
+helm_install redpanda-console \"\$CHARTS/redpanda-console\" infrastructure \
+    --set domain=\"redpanda.\$DOMAIN\"
 
 step \"Deploying Keycloak...\"
 helm_install keycloak \"\$CHARTS/keycloak\" infrastructure \
@@ -143,8 +148,9 @@ echo -e \"\\033[1;32m  Dominio: https://\${DOMAIN}\\033[0m\"
 echo -e \"\\033[1;32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\033[0m\"
 echo \"\"
 echo \"  URLs accesibles:\"
-echo \"    Keycloak: https://\${DOMAIN}/auth\"
-echo \"    Grafana:  https://\${DOMAIN}/panel\"
+echo \"    Keycloak:        https://\${DOMAIN}/auth\"
+echo \"    Grafana:         https://\${DOMAIN}/panel\"
+echo \"    Redpanda Console: https://redpanda.\${DOMAIN}\"
 echo \"\"
 echo \"  Service endpoints:\"
 echo \"    PostgreSQL: postgresql.infrastructure.svc.cluster.local:5432\"
@@ -156,6 +162,8 @@ echo \"    Grafana:    grafana.observability.svc.cluster.local:3000\"
 echo \"\"
 echo -e \"\\033[1;36m  Ver contraseña de Grafana:\\033[0m\"
 echo -e \"\\033[1;36m  kubectl get secret grafana-credentials -n observability -o jsonpath='{.data.admin-password}' | base64 -d\\033[0m\"
+echo -e \"\\033[1;36m  Ver contraseña de Redpanda Console:\\033[0m\"
+echo -e \"\\033[1;36m  kubectl get secret redpanda-console-credentials -n infrastructure -o jsonpath='{.data.admin-password}' | base64 -d\\033[0m\"
 echo -e \"\\033[1;36m  kubectl get secrets -n infrastructure\\033[0m\"
 INFRA_SCRIPT
 bash /tmp/infra-$$.sh '$DOMAIN'
