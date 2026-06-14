@@ -42,6 +42,8 @@ helm upgrade --install ticketmonster /tmp/ticketmonster-chart \
     --namespace ticket-monster \
     --set image.tag=\"\${TAG}\" \
     --set ingress.host=\"\${DOMAIN}\" \
+    --set env.KEYCLOAK_ISSUER_URI=\"https://\${DOMAIN}/auth/realms/ticket-monster\" \
+    --set env.KEYCLOAK_JWK_SET_URI=\"https://\${DOMAIN}/auth/realms/ticket-monster/protocol/openid-connect/certs\" \
     --wait --timeout 5m
 
 ok \"Helm: ticketmonster (tag: \${TAG})\"

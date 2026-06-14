@@ -4,14 +4,14 @@ set -euo pipefail
 # ============================================================
 # Ticket Monster — Frontend CLI Emulator
 # ============================================================
-# Uso: ./frontend.sh <usuario> <password>
+# Uso: ./frontend.sh <usuario> <password> [base_url] [-v]
+#   base_url: URL del monólito (default: https://janrax.es)
+#   -v: modo verbose (muestra comandos curl)
 # ============================================================
 
-# --- URLs configurables ---
-KEYCLOAK_URL="http://localhost:8180"
-GATEWAY_URL="http://localhost:8080"
-MONOLITH_URL="http://localhost:8082"
-CLIENT_ID="ticket-monster-app"
+# --- URLs por defecto ---
+DEFAULT_BASE="https://janrax.es"
+DEFAULT_KEYCLOAK="https://janrax.es/auth"
 
 # --- Estado interno ---
 ACCESS_TOKEN=""
@@ -20,7 +20,9 @@ EXPIRES_AT=0
 ROLE=""
 JQ_AVAILABLE=false
 API_BASE_URL=""
+KEYCLOAK_URL=""
 VERBOSE=false
+CLIENT_ID="ticket-monster-app"
 
 # === FUNCIONES AUXILIARES ===
 
@@ -60,57 +62,18 @@ leer_input() {
 health_check() {
     echo "[*] Verificando entorno..."
 
-    local kc_ok=false gw_ok=false mono_ok=false
+    if curl -s -o /dev/null --connect-timeout 5 "$API_BASE_URL/graphql" 2>/dev/null; then
+        echo "  [✓] Monólito ($API_BASE_URL)"
+    else
+        echo "[ERROR] Monólito no responde en $API_BASE_URL"
+        exit 1
+    fi
 
     if curl -sf "$KEYCLOAK_URL" >/dev/null 2>&1; then
-        kc_ok=true
         echo "  [✓] Keycloak ($KEYCLOAK_URL)"
     else
-        echo "  [✗] Keycloak ($KEYCLOAK_URL)"
-    fi
-
-    if curl -s -o /dev/null --connect-timeout 3 "$GATEWAY_URL/fallback/catalog" 2>/dev/null; then
-        gw_ok=true
-        API_BASE_URL="$GATEWAY_URL"
-        echo "  [✓] API Gateway ($GATEWAY_URL)"
-    elif curl -s -o /dev/null --connect-timeout 3 "$GATEWAY_URL" 2>/dev/null; then
-        gw_ok=true
-        API_BASE_URL="$GATEWAY_URL"
-        echo "  [✓] API Gateway ($GATEWAY_URL)"
-    else
-        echo "  [✗] API Gateway ($GATEWAY_URL)"
-    fi
-
-    if ! $gw_ok; then
-        if curl -s -o /dev/null --connect-timeout 3 "$MONOLITH_URL/graphql" 2>/dev/null || \
-           curl -s -o /dev/null --connect-timeout 3 "$MONOLITH_URL" 2>/dev/null; then
-            mono_ok=true
-            API_BASE_URL="$MONOLITH_URL"
-            echo "  [✓] Monolito directo ($MONOLITH_URL)"
-            echo "  [!] API Gateway no disponible. Usando monolith directo."
-            echo "      Nota: Solo funcionarán operaciones GraphQL. El flujo de compra"
-            echo "      (cola, reserva, pago) requiere el API Gateway."
-        fi
-    fi
-
-    if ! $kc_ok; then
-        echo ""
-        echo "[ERROR] Keycloak no responde. Ejecuta primero:"
-        echo "  docker compose --profile dev up -d"
-        echo ""
-        exit 1
-    fi
-
-    if [[ -z "$API_BASE_URL" ]]; then
-        echo ""
-        echo "[ERROR] No se pudo conectar al backend."
-        echo "        La infraestructura está OK pero falta levantar la app:"
-        echo "  cd backend/ticketmonster && ./gradlew bootRun"
-        echo ""
-        echo "        Para usar el API Gateway (recomendado):"
-        echo "  cd backend/api-gateway && ./gradlew bootRun"
-        echo ""
-        exit 1
+        echo "[!] No se pudo verificar Keycloak en $KEYCLOAK_URL"
+        echo "    El login puede fallar si la URL es incorrecta."
     fi
 }
 
@@ -843,24 +806,46 @@ main() {
     echo "============================================"
     echo ""
 
-    # Validar argumentos
-    if [[ $# -lt 2 ]]; then
-        echo "Uso: $0 <usuario> <password> [-v]"
+    # Parsear argumentos
+    local username="" password=""
+    local args=()
+
+    for arg in "$@"; do
+        if [[ "$arg" == "-v" ]]; then
+            VERBOSE=true
+        else
+            args+=("$arg")
+        fi
+    done
+
+    if [[ ${#args[@]} -lt 2 ]]; then
+        echo "Uso: $0 <usuario> <password> [base_url] [-v]"
         echo ""
         echo "Usuarios de prueba:"
         echo "  admin / admin  (roles: ADMIN, USER)"
         echo "  user  / user   (rol: USER)"
         echo ""
-        echo "Opciones:"
-        echo "  -v    Muestra el comando curl equivalente antes de cada llamada"
+        echo "Argumentos:"
+        echo "  base_url      URL del monólito (default: $DEFAULT_BASE)"
+        echo "  keycloak_url  URL de Keycloak (default: $DEFAULT_KEYCLOAK)"
+        echo "  -v            Muestra el comando curl equivalente"
+        echo ""
+        echo "Ejemplos:"
+        echo "  $0 admin admin"
+        echo "  $0 user user https://ticketmonster.example.com"
+        echo "  $0 admin admin http://localhost:8082 http://localhost:8180"
+        echo "  $0 admin admin -v"
         echo ""
         exit 1
     fi
 
-    local username="$1" password="$2"
-    if [[ "${3:-}" == "-v" ]]; then
-        VERBOSE=true
-        echo "  [*] Modo verbose activado — se mostrarán los comandos curl"
+    username="${args[0]}"
+    password="${args[1]}"
+    API_BASE_URL="${args[2]:-$DEFAULT_BASE}"
+    KEYCLOAK_URL="${args[3]:-$DEFAULT_KEYCLOAK}"
+
+    if $VERBOSE; then
+        echo "  [*] Modo verbose activado"
     fi
 
     check_deps
@@ -870,6 +855,7 @@ main() {
 
     echo ""
     echo "  Bienvenido, $username ($ROLE)"
+    echo "  API: $API_BASE_URL"
     echo ""
 
     if [[ "$ROLE" == "ADMIN" ]]; then
