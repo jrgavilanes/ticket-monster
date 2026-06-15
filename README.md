@@ -245,16 +245,16 @@ flowchart TB
 - JDK 21
 - Gradle 9.5+
 
-### 1. Start infrastructure
+### 1. Start everything (infrastructure + app)
 ```bash
-cp .env.example .env
-docker compose --profile dev up -d
+docker compose --profile app up -d
 ```
 
-This starts PostgreSQL, MongoDB, Redis, Redpanda, Keycloak, Prometheus, Loki, Tempo, and Grafana.
+This builds and starts the monolith (`ticketmonster` on `:8082`) plus all infrastructure: PostgreSQL, MongoDB, Redis, Redpanda, Keycloak, Prometheus, Loki, Tempo, and Grafana.
 
-### 2. Run the application
+### 2. Run the app natively (outside Docker)
 ```bash
+docker compose --profile infra up -d
 cd backend/ticketmonster
 ./gradlew bootRun
 ```
@@ -267,9 +267,21 @@ The app connects to infrastructure on:
 - Keycloak → `localhost:8180`
 
 > **Note:** Redpanda exposes Kafka on port `19092` externally (not the default `9092`).
-> Keycloak is on port `8180` (not `8080`) to avoid conflict with the API Gateway.
+> Keycloak is on port `8180` to avoid conflict with other services.
 
-### 3. Get an access token
+### 3. Build the Docker image locally
+```bash
+docker build -t ticket-monster:local \
+  -f backend/ticketmonster/Dockerfile \
+  backend/ticketmonster
+```
+
+Rebuild and restart after code changes:
+```bash
+docker compose --profile app up -d --build ticketmonster
+```
+
+### 4. Get an access token
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
@@ -278,7 +290,7 @@ TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/ope
   -d "grant_type=password" | jq -r '.access_token')
 ```
 
-### 4. Try the API
+### 5. Try the API
 
 ```bash
 # Query events via GraphQL
@@ -292,12 +304,10 @@ curl -s -X POST http://localhost:8082/api/v1/queue/EVENT_ID/join \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-### Full stack (Docker only)
+### CLI Emulator
 ```bash
-docker compose --profile app up -d
+./frontend/frontend.sh admin admin http://localhost:8082 http://localhost:8180
 ```
-
-This also builds and runs `ticketmonster` and `api-gateway` inside Docker.
 
 ### Reset data
 ```bash
@@ -398,10 +408,12 @@ Emulador interactivo por terminal que consume la API de Ticket Monster. Permite 
 ### Uso
 
 ```bash
-./frontend/frontend.sh <usuario> <password> [-v]
+./frontend/frontend.sh <usuario> <password> [monolith_url] [keycloak_url] [-v]
 ```
 
-- `-v`: Muestra el comando curl equivalente antes de ejecutar cada llamada (modo verbose).
+- `monolith_url`: URL del monólito (default: `https://janrax.es`)
+- `keycloak_url`: URL de Keycloak (default: `https://janrax.es/auth`)
+- `-v`: Muestra el comando curl equivalente antes de ejecutar cada llamada.
 
 El script detecta automáticamente si eres administrador o usuario regular y muestra el menú correspondiente.
 
@@ -412,38 +424,31 @@ El script detecta automáticamente si eres administrador o usuario regular y mue
 | `admin` | `admin` | ADMIN, USER | Crear artista/venue/evento, publicar, listar, disponibilidad |
 | `user` | `user` | USER | Listar eventos, disponibilidad, comprar entradas, pagar |
 
-### URLs configurables
-
-Edita las variables al inicio de `frontend/frontend.sh`:
+### Ejemplos
 
 ```bash
-KEYCLOAK_URL="http://localhost:8180"
-GATEWAY_URL="http://localhost:8080"
-MONOLITH_URL="http://localhost:8082"
+# Local
+./frontend/frontend.sh admin admin http://localhost:8082 http://localhost:8180
+
+# Remoto (usa defaults)
+./frontend/frontend.sh admin admin
 ```
 
-El script usa `GATEWAY_URL` primero; si no responde, prueba `MONOLITH_URL` automáticamente.
-
-### Health check automático
-
-Al ejecutar, el script verifica que Keycloak y el backend responden. Primero intenta con API Gateway (`:8080`); si no está disponible, prueba con el monolith directo (`:8082`). Si ninguno responde, muestra cómo levantar el entorno.
-
-### Ejemplo: Sesión administrador
+### Sesión administrador
 
 ```bash
-./frontend/frontend.sh admin admin
+./frontend/frontend.sh admin admin http://localhost:8082 http://localhost:8180
 
 # 1. Crear Artista  →  Foo Fighters, Rock
 # 2. Crear Venue    →  Wembley, 90000
 # 3. Crear Evento   →  Foo Fighters Live, CONCERT, venueId anterior, zonas: Pista 40000x80 + Grada 30000x120
 # 4. Publicar Evento → eventId anterior
-# 5. Listar Eventos → muestra el evento creado
 ```
 
-### Ejemplo: Sesión usuario
+### Sesión usuario
 
 ```bash
-./frontend/frontend.sh user user
+./frontend/frontend.sh user user http://localhost:8082 http://localhost:8180
 
 # 1. Listar Eventos → elegir un evento
 # 3. Comprar entradas → eventId, se une a cola, espera turno, zonaId, cantidad
