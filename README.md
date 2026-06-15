@@ -6,6 +6,8 @@ Sistema en línea de venta de tickets para eventos de gran escala. Soporta 50M u
 
 Monolito modular event-driven con Spring Modulith. Cada módulo mapea a un bounded context de DDD con comunicación híbrida (síncrona + asíncrona).
 
+> **Evolution:** The API Gateway (`Spring Cloud Gateway`) was removed after k6 load tests revealed significant connection pooling overhead and latency under high concurrency. The monolith now handles all traffic directly. In production, **Traefik Ingress** (K3s native) provides TLS termination, rate limiting, and resilience — eliminating the extra network hop and connection churn while still applying policies at the edge.
+
 ```mermaid
 flowchart TB
     subgraph Users
@@ -13,7 +15,6 @@ flowchart TB
     end
 
     subgraph Edge
-        GW[API Gateway<br/>Spring Cloud Gateway<br/>:8080]
         KC[Keycloak<br/>OAuth2/OIDC]
     end
 
@@ -41,12 +42,11 @@ flowchart TB
         TEMPO[Tempo]
     end
 
-    Browser --> GW
-    GW --> KC
-    GW --> CAT
-    GW --> VQ
-    GW --> RES
-    GW --> PAY
+    Browser --> KC
+    Browser --> CAT
+    Browser --> VQ
+    Browser --> RES
+    Browser --> PAY
     CAT --> MONGO
     RES --> PG
     PAY --> PG
@@ -79,37 +79,31 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     actor User
-    participant GW as API Gateway
     participant Q as Virtual Queue
     participant R as Reservation
     participant RP as Redpanda
     participant P as Payment
 
-    User->>GW: POST /queue/{eventId}/join
-    GW->>Q: Enqueue user (Redis LPUSH)
+    User->>Q: POST /api/v1/queue/{eventId}/join
     Q-->>User: ticketId + position
 
     loop Polling
-        User->>GW: GET /queue/{eventId}/status
-        GW->>Q: Check position
+        User->>Q: GET /api/v1/queue/{eventId}/status
         Q-->>User: position / TURN_READY
     end
 
-    User->>GW: GET /queue/{eventId}/token
-    GW->>Q: Issue access token
+    User->>Q: GET /api/v1/queue/{eventId}/token
     Q-->>User: JWT (5 min TTL)
 
-    User->>GW: POST /reservations
-    GW->>R: Create reservation (Redis lock + PostgreSQL)
+    User->>R: POST /api/v1/reservations
+    R->>R: Create reservation (Redis lock + PostgreSQL)
     R->>RP: reservation-created
     R-->>User: reservationId + expiresAt
 
-    User->>GW: POST /payments
-    GW->>P: Initiate payment
+    User->>P: POST /api/v1/payments
     P-->>User: paymentId
 
-    User->>GW: POST /payments/{id}/confirm
-    GW->>P: Confirm payment (webhook)
+    User->>P: POST /api/v1/payments/{id}/confirm
     P->>RP: payment-confirmed
     RP->>R: payment-confirmed
     R->>R: Convert reservation to SOLD
@@ -195,7 +189,7 @@ flowchart TB
         end
     end
 
-    INGRESS[Ingress<br/>Traefik + TLS] --> TM1
+    INGRESS[Ingress<br/>Traefik + TLS + Rate Limiting] --> TM1
     INGRESS --> TM2
     TM1 --> PG
     TM1 --> MONGO
@@ -230,7 +224,7 @@ flowchart TB
 | Orquestador | K3s |
 | DB relacional | PostgreSQL |
 | DB documental | MongoDB |
-| Edge / Ingress | K3s Traefik (rate limiting, TLS, headers) |
+| Edge / Ingress | K3s Traefik (TLS termination, rate limiting, secure headers) |
 | Auth | Keycloak (OAuth2 + OIDC) |
 | API Catalog | Spring for GraphQL |
 | Resiliencia | Resilience4j 2.3.0 |
@@ -388,7 +382,6 @@ http://localhost:8180/admin (admin / admin)
 
 | Service | URL |
 |---------|-----|
-| API Gateway | http://localhost:8080 |
 | Monolith (app) | http://localhost:8082 |
 | GraphQL endpoint | http://localhost:8082/graphql |
 | Keycloak | http://localhost:8180 |

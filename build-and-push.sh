@@ -9,6 +9,10 @@ FULL_IMAGE="${REGISTRY}/${IMAGE_NAME}:${TAG}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="${SCRIPT_DIR}/backend/ticketmonster"
 
+echo "==> Running tests..."
+(cd "${DOCKER_DIR}" && ./gradlew test --no-daemon)
+echo -e "\033[1;32m  ✓ Tests passed\033[0m"
+
 echo "==> Building ${FULL_IMAGE}..."
 
 docker build \
