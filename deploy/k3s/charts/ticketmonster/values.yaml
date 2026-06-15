@@ -16,6 +16,9 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticket-monster-rate-limit@kubernetescrd,ticket-monster-ticket-monster-secure-headers@kubernetescrd
+  graphqlAnnotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticket-monster-secure-headers@kubernetescrd
   tls: true
 
 resources:

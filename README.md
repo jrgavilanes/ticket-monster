@@ -7,6 +7,8 @@ Sistema en línea de venta de tickets para eventos de gran escala. Soporta 50M u
 Monolito modular event-driven con Spring Modulith. Cada módulo mapea a un bounded context de DDD con comunicación híbrida (síncrona + asíncrona).
 
 > **Evolution:** The API Gateway (`Spring Cloud Gateway`) was removed after k6 load tests revealed significant connection pooling overhead and latency under high concurrency. The monolith now handles all traffic directly. In production, **Traefik Ingress** (K3s native) provides TLS termination, rate limiting, and resilience — eliminating the extra network hop and connection churn while still applying policies at the edge.
+>
+> **Rate limiting strategy:** Read queries (`/graphql`) are **not rate-limited** — they're public and cheap. Rate limiting via Traefik applies only to write endpoints (`/api/v1/reservations`, `/api/v1/payments`, etc.). Two separate Ingress resources enforce this: `ticketmonster-graphql` (catch-all, no rate limit) and `ticketmonster` (`/api/*`, `/actuator/*`, with rate limit + secure headers).
 
 ```mermaid
 flowchart TB
@@ -253,6 +255,13 @@ cd backend/ticketmonster
 ./gradlew bootRun
 ```
 
+Or run from IntelliJ:
+```bash
+# Only infrastructure in Docker, app runs from IDE
+docker compose --profile infra up -d
+```
+Then run the `TicketmonsterApplication` main class in IntelliJ (default profile reads `application.yml` with `localhost` defaults).
+
 The app connects to infrastructure on:
 - PostgreSQL → `localhost:5432`
 - MongoDB → `localhost:27017`
@@ -306,6 +315,79 @@ curl -s -X POST http://localhost:8082/api/v1/queue/EVENT_ID/join \
 ### Reset data
 ```bash
 docker compose down -v
+```
+
+---
+
+## Tests
+
+### Unit tests (Gradle)
+
+```bash
+# Run all tests
+cd backend/ticketmonster
+./gradlew test --no-daemon
+
+# Build will fail if tests don't pass (CI + build-and-push.sh)
+```
+
+### Load tests (k6)
+
+Install k6 (Debian 13 / Trixie):
+```bash
+sudo apt-get update && sudo apt-get install -y gnupg
+curl -fsSL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6.gpg
+echo "deb [signed-by=/usr/share/keyrings/k6.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+sudo apt-get update && sudo apt-get install -y k6
+```
+
+Prerequisites: infra + app running:
+```bash
+docker compose --profile app up -d
+```
+
+# 1. Catalog read (public, no auth needed)
+k6 run deploy/tests/k6/catalog-read.js
+
+# 2. Queue join (requires auth + real event)
+TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=ticket-monster-app" \
+  -d "username=admin" -d "password=admin" \
+  -d "grant_type=password" | jq -r '.access_token')
+
+EVENT_ID=$(curl -s http://localhost:8082/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ events(page: 0, size: 1) { content { id } } }"}' | jq -r '.data.events.content[0].id')
+
+k6 run --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" deploy/tests/k6/queue-load.js
+
+# 3. Reservation contention (requires event with zone stock)
+k6 run --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" --env ZONE_ID="<zone-id>" deploy/tests/k6/reservation-contention.js
+```
+
+> **Note:** Defaults are `BASE_URL=http://localhost:8082`. Override with `--env BASE_URL=<url>`.
+> Reduce VUs for local runs (e.g. `--vus 100 --duration 10s`).  The defaults (5k–10k VUs) target CI/production.
+
+#### Run against production (janrax.es)
+
+```bash
+k6 run --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
+```
+
+For authenticated tests, get a token from the remote Keycloak and set `AUTH_TOKEN`:
+```bash
+TOKEN=$(curl -s -X POST https://janrax.es/auth/realms/ticket-monster/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=ticket-monster-app" \
+  -d "username=admin" -d "password=admin" \
+  -d "grant_type=password" | jq -r '.access_token')
+
+EVENT_ID=$(curl -s https://janrax.es/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ events(page: 0, size: 1) { content { id } } }"}' | jq -r '.data.events.content[0].id')
+
+k6 run --env BASE_URL=https://janrax.es --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" deploy/tests/k6/queue-load.js
 ```
 
 ---
@@ -456,7 +538,41 @@ El script detecta automáticamente si eres administrador o usuario regular y mue
   - Registre el error completo en los logs estructurados para observabilidad (Loki + Tempo traceId)
   - Exponga el traceId en la respuesta al cliente para correlación
 
-## Provisioning (Remote K3s)
+## Performance & Scaling Insights
+
+### Key metrics
+
+| Metric | Meaning | Target |
+|--------|---------|--------|
+| **p50 (median)** | The 50th percentile — half the requests are faster than this | User-facing perception |
+| **p95** | 95% of requests complete under this time — the real user experience | `<200ms` for reads, `<5s` for purchases |
+| **p99** | 99th percentile — the long tail | Monitor for outliers |
+| **error rate** | Percentage of failed requests | `<1%` |
+| **throughput** | Requests per second the system handles | Depends on scale |
+
+> **p95 matters more than average.** The average hides problems: a few very slow requests pull it up only slightly. p95 shows what 95% of your users actually experience.
+
+### Scaling observations (k6 load tests)
+
+| Scenario | VUs | Pods | p95 | Errors | Bottleneck |
+|----------|-----|------|-----|--------|------------|
+| Catalog read | 5000 | 1 | — | 99.88% | Rate limiter (Traefik) |
+| Catalog read | 1000 | 1 | 9.26s | 0% | Single pod CPU |
+| Catalog read | 1000 | 2 | 16.41s | 0% | **Database contention** |
+
+**Key findings:**
+
+- **Removing rate limit from `/graphql` eliminated all errors** — read traffic should never be throttled
+- **Scaling to 2 pods improved median from 5.5s → 1.0s** (5x) but p95 worsened
+- **The bottleneck is now the databases** (MongoDB + PostgreSQL), not the application pods
+- Both pods compete for the same database connections, causing queuing at peak
+
+### Next steps for higher throughput
+
+1. **Connection pooling** — Add PgBond piscina (PgBouncer) to multiplex database connections. Currently 2 pods × 20 Hikari connections = 40 concurrent connections to PostgreSQL. PgBouncer in transaction mode can handle thousands of client connections over a few real DB connections.
+2. **Read replicas** — Offload catalog reads to MongoDB replicas / PostgreSQL read replicas
+3. **Query optimisation** — Check `pg_stat_statements` for slow queries and missing indexes
+4. **HPA tuning** — Increase `minReplicas` and adjust CPU/memory targets based on real load
 
 ```bash
 # 1. Provision K3s cluster

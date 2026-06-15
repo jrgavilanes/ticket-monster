@@ -10,7 +10,7 @@ export const options = {
     },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 const EVENT_ID = __ENV.EVENT_ID || 'test-event-1';
 const ZONE_ID = __ENV.ZONE_ID || 'zone-general';
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || '';
@@ -47,8 +47,6 @@ export default function () {
         return;
     }
 
-    const queueToken = tokenRes.json().token;
-
     const reservationPayload = JSON.stringify({
         eventId: EVENT_ID,
         items: [{ zoneId: ZONE_ID, quantity: 1 }],
@@ -61,7 +59,6 @@ export default function () {
             headers: {
                 'Authorization': `Bearer ${AUTH_TOKEN}`,
                 'Content-Type': 'application/json',
-                'X-Queue-Token': queueToken,
             },
         }
     );
