@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tempo
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: tempo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  serviceName: tempo
+  template:
+    metadata:
+      labels:
+        app: tempo
+    spec:
+      containers:
+        - name: tempo
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args:
+            - -config.file=/etc/tempo.yaml
+          ports:
+            - containerPort: {{ .Values.httpPort }}
+              name: http
+            - containerPort: {{ .Values.otlpGrpcPort }}
+              name: otlp-grpc
+            - containerPort: {{ .Values.otlpHttpPort }}
+              name: otlp-http
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.httpPort }}
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.httpPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.httpPort }}
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo.yaml
+              subPath: tempo.yaml
+            - name: data
+              mountPath: /var/tempo
+      volumes:
+        - name: config
+          configMap:
+            name: tempo-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.storage }}

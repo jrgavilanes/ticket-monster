@@ -6,6 +6,10 @@ Sistema en línea de venta de tickets para eventos de gran escala. Soporta 50M u
 
 Monolito modular event-driven con Spring Modulith. Cada módulo mapea a un bounded context de DDD con comunicación híbrida (síncrona + asíncrona).
 
+> **Evolution:** The API Gateway (`Spring Cloud Gateway`) was removed after k6 load tests revealed significant connection pooling overhead and latency under high concurrency. The monolith now handles all traffic directly. In production, **Traefik Ingress** (K3s native) provides TLS termination, rate limiting, and resilience — eliminating the extra network hop and connection churn while still applying policies at the edge.
+>
+> **Rate limiting strategy:** Read queries (`/graphql`) are **not rate-limited** — they're public and cheap. Rate limiting via Traefik applies only to write endpoints (`/api/v1/reservations`, `/api/v1/payments`, etc.). Two separate Ingress resources enforce this: `ticketmonster-graphql` (catch-all, no rate limit) and `ticketmonster` (`/api/*`, `/actuator/*`, with rate limit + secure headers).
+
 ```mermaid
 flowchart TB
     subgraph Users
@@ -13,7 +17,6 @@ flowchart TB
     end
 
     subgraph Edge
-        GW[API Gateway<br/>Spring Cloud Gateway<br/>:8080]
         KC[Keycloak<br/>OAuth2/OIDC]
     end
 
@@ -41,12 +44,11 @@ flowchart TB
         TEMPO[Tempo]
     end
 
-    Browser --> GW
-    GW --> KC
-    GW --> CAT
-    GW --> VQ
-    GW --> RES
-    GW --> PAY
+    Browser --> KC
+    Browser --> CAT
+    Browser --> VQ
+    Browser --> RES
+    Browser --> PAY
     CAT --> MONGO
     RES --> PG
     PAY --> PG
@@ -79,37 +81,31 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     actor User
-    participant GW as API Gateway
     participant Q as Virtual Queue
     participant R as Reservation
     participant RP as Redpanda
     participant P as Payment
 
-    User->>GW: POST /queue/{eventId}/join
-    GW->>Q: Enqueue user (Redis LPUSH)
+    User->>Q: POST /api/v1/queue/{eventId}/join
     Q-->>User: ticketId + position
 
     loop Polling
-        User->>GW: GET /queue/{eventId}/status
-        GW->>Q: Check position
+        User->>Q: GET /api/v1/queue/{eventId}/status
         Q-->>User: position / TURN_READY
     end
 
-    User->>GW: GET /queue/{eventId}/token
-    GW->>Q: Issue access token
+    User->>Q: GET /api/v1/queue/{eventId}/token
     Q-->>User: JWT (5 min TTL)
 
-    User->>GW: POST /reservations
-    GW->>R: Create reservation (Redis lock + PostgreSQL)
+    User->>R: POST /api/v1/reservations
+    R->>R: Create reservation (Redis lock + PostgreSQL)
     R->>RP: reservation-created
     R-->>User: reservationId + expiresAt
 
-    User->>GW: POST /payments
-    GW->>P: Initiate payment
+    User->>P: POST /api/v1/payments
     P-->>User: paymentId
 
-    User->>GW: POST /payments/{id}/confirm
-    GW->>P: Confirm payment (webhook)
+    User->>P: POST /api/v1/payments/{id}/confirm
     P->>RP: payment-confirmed
     RP->>R: payment-confirmed
     R->>R: Convert reservation to SOLD
@@ -172,8 +168,6 @@ flowchart TB
         subgraph NS1[namespace: ticket-monster]
             TM1[ticketmonster pod 1]
             TM2[ticketmonster pod 2]
-            GW1[api-gateway pod 1]
-            GW2[api-gateway pod 2]
             HPA[HPA]
         end
 
@@ -197,10 +191,8 @@ flowchart TB
         end
     end
 
-    INGRESS[Ingress<br/>nginx + TLS] --> GW1
-    INGRESS --> GW2
-    GW1 --> TM1
-    GW2 --> TM2
+    INGRESS[Ingress<br/>Traefik + TLS + Rate Limiting] --> TM1
+    INGRESS --> TM2
     TM1 --> PG
     TM1 --> MONGO
     TM1 --> REDIS
@@ -234,7 +226,7 @@ flowchart TB
 | Orquestador | K3s |
 | DB relacional | PostgreSQL |
 | DB documental | MongoDB |
-| API Gateway | Spring Cloud Gateway 2025.1.1 |
+| Edge / Ingress | K3s Traefik (TLS termination, rate limiting, secure headers) |
 | Auth | Keycloak (OAuth2 + OIDC) |
 | API Catalog | Spring for GraphQL |
 | Resiliencia | Resilience4j 2.3.0 |
@@ -249,19 +241,26 @@ flowchart TB
 - JDK 21
 - Gradle 9.5+
 
-### 1. Start infrastructure
+### 1. Start everything (infrastructure + app)
 ```bash
-cp .env.example .env
-docker compose --profile dev up -d
+docker compose --profile app up -d
 ```
 
-This starts PostgreSQL, MongoDB, Redis, Redpanda, Keycloak, Prometheus, Loki, Tempo, and Grafana.
+This builds and starts the monolith (`ticketmonster` on `:8082`) plus all infrastructure: PostgreSQL, MongoDB, Redis, Redpanda, Keycloak, Prometheus, Loki, Tempo, and Grafana.
 
-### 2. Run the application
+### 2. Run the app natively (outside Docker)
 ```bash
+docker compose --profile infra up -d
 cd backend/ticketmonster
 ./gradlew bootRun
 ```
+
+Or run from IntelliJ:
+```bash
+# Only infrastructure in Docker, app runs from IDE
+docker compose --profile infra up -d
+```
+Then run the `TicketmonsterApplication` main class in IntelliJ (default profile reads `application.yml` with `localhost` defaults).
 
 The app connects to infrastructure on:
 - PostgreSQL → `localhost:5432`
@@ -271,9 +270,21 @@ The app connects to infrastructure on:
 - Keycloak → `localhost:8180`
 
 > **Note:** Redpanda exposes Kafka on port `19092` externally (not the default `9092`).
-> Keycloak is on port `8180` (not `8080`) to avoid conflict with the API Gateway.
+> Keycloak is on port `8180` to avoid conflict with other services.
 
-### 3. Get an access token
+### 3. Build the Docker image locally
+```bash
+docker build -t ticket-monster:local \
+  -f backend/ticketmonster/Dockerfile \
+  backend/ticketmonster
+```
+
+Rebuild and restart after code changes:
+```bash
+docker compose --profile app up -d --build ticketmonster
+```
+
+### 4. Get an access token
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
@@ -282,7 +293,7 @@ TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/ope
   -d "grant_type=password" | jq -r '.access_token')
 ```
 
-### 4. Try the API
+### 5. Try the API
 
 ```bash
 # Query events via GraphQL
@@ -296,16 +307,87 @@ curl -s -X POST http://localhost:8082/api/v1/queue/EVENT_ID/join \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-### Full stack (Docker only)
+### CLI Emulator
 ```bash
-docker compose --profile app up -d
+./frontend/frontend.sh admin admin http://localhost:8082 http://localhost:8180
 ```
-
-This also builds and runs `ticketmonster` and `api-gateway` inside Docker.
 
 ### Reset data
 ```bash
 docker compose down -v
+```
+
+---
+
+## Tests
+
+### Unit tests (Gradle)
+
+```bash
+# Run all tests
+cd backend/ticketmonster
+./gradlew test --no-daemon
+
+# Build will fail if tests don't pass (CI + build-and-push.sh)
+```
+
+### Load tests (k6)
+
+Install k6 (Debian 13 / Trixie):
+```bash
+sudo apt-get update && sudo apt-get install -y gnupg
+curl -fsSL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6.gpg
+echo "deb [signed-by=/usr/share/keyrings/k6.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+sudo apt-get update && sudo apt-get install -y k6
+```
+
+Prerequisites: infra + app running:
+```bash
+docker compose --profile app up -d
+```
+
+# 1. Catalog read (public, no auth needed)
+k6 run deploy/tests/k6/catalog-read.js
+
+# 2. Queue join (requires auth + real event)
+TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=ticket-monster-app" \
+  -d "username=admin" -d "password=admin" \
+  -d "grant_type=password" | jq -r '.access_token')
+
+EVENT_ID=$(curl -s http://localhost:8082/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ events(page: 0, size: 1) { content { id } } }"}' | jq -r '.data.events.content[0].id')
+
+k6 run --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" deploy/tests/k6/queue-load.js
+
+# 3. Reservation contention (requires event with zone stock)
+k6 run --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" --env ZONE_ID="<zone-id>" deploy/tests/k6/reservation-contention.js
+```
+
+> **Note:** Defaults are `BASE_URL=http://localhost:8082`. Override with `--env BASE_URL=<url>`.
+> Reduce VUs for local runs (e.g. `--vus 100 --duration 10s`).  The defaults (5k–10k VUs) target CI/production.
+
+#### Run against production (janrax.es)
+
+```bash
+k6 run --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
+```
+
+For authenticated tests, get a token from the remote Keycloak and set `AUTH_TOKEN`:
+```bash
+TOKEN=$(curl -s -X POST https://janrax.es/auth/realms/ticket-monster/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "client_id=ticket-monster-app" \
+  -d "username=admin" -d "password=admin" \
+  -d "grant_type=password" | jq -r '.access_token')
+
+EVENT_ID=$(curl -s https://janrax.es/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ events(page: 0, size: 1) { content { id } } }"}' | jq -r '.data.events.content[0].id')
+
+k6 run --env BASE_URL=https://janrax.es --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" deploy/tests/k6/queue-load.js
 ```
 
 ---
@@ -382,7 +464,6 @@ http://localhost:8180/admin (admin / admin)
 
 | Service | URL |
 |---------|-----|
-| API Gateway | http://localhost:8080 |
 | Monolith (app) | http://localhost:8082 |
 | GraphQL endpoint | http://localhost:8082/graphql |
 | Keycloak | http://localhost:8180 |
@@ -402,10 +483,12 @@ Emulador interactivo por terminal que consume la API de Ticket Monster. Permite 
 ### Uso
 
 ```bash
-./frontend/frontend.sh <usuario> <password> [-v]
+./frontend/frontend.sh <usuario> <password> [monolith_url] [keycloak_url] [-v]
 ```
 
-- `-v`: Muestra el comando curl equivalente antes de ejecutar cada llamada (modo verbose).
+- `monolith_url`: URL del monólito (default: `https://janrax.es`)
+- `keycloak_url`: URL de Keycloak (default: `https://janrax.es/auth`)
+- `-v`: Muestra el comando curl equivalente antes de ejecutar cada llamada.
 
 El script detecta automáticamente si eres administrador o usuario regular y muestra el menú correspondiente.
 
@@ -416,38 +499,31 @@ El script detecta automáticamente si eres administrador o usuario regular y mue
 | `admin` | `admin` | ADMIN, USER | Crear artista/venue/evento, publicar, listar, disponibilidad |
 | `user` | `user` | USER | Listar eventos, disponibilidad, comprar entradas, pagar |
 
-### URLs configurables
-
-Edita las variables al inicio de `frontend/frontend.sh`:
+### Ejemplos
 
 ```bash
-KEYCLOAK_URL="http://localhost:8180"
-GATEWAY_URL="http://localhost:8080"
-MONOLITH_URL="http://localhost:8082"
+# Local
+./frontend/frontend.sh admin admin http://localhost:8082 http://localhost:8180
+
+# Remoto (usa defaults)
+./frontend/frontend.sh admin admin
 ```
 
-El script usa `GATEWAY_URL` primero; si no responde, prueba `MONOLITH_URL` automáticamente.
-
-### Health check automático
-
-Al ejecutar, el script verifica que Keycloak y el backend responden. Primero intenta con API Gateway (`:8080`); si no está disponible, prueba con el monolith directo (`:8082`). Si ninguno responde, muestra cómo levantar el entorno.
-
-### Ejemplo: Sesión administrador
+### Sesión administrador
 
 ```bash
-./frontend/frontend.sh admin admin
+./frontend/frontend.sh admin admin http://localhost:8082 http://localhost:8180
 
 # 1. Crear Artista  →  Foo Fighters, Rock
 # 2. Crear Venue    →  Wembley, 90000
 # 3. Crear Evento   →  Foo Fighters Live, CONCERT, venueId anterior, zonas: Pista 40000x80 + Grada 30000x120
 # 4. Publicar Evento → eventId anterior
-# 5. Listar Eventos → muestra el evento creado
 ```
 
-### Ejemplo: Sesión usuario
+### Sesión usuario
 
 ```bash
-./frontend/frontend.sh user user
+./frontend/frontend.sh user user http://localhost:8082 http://localhost:8180
 
 # 1. Listar Eventos → elegir un evento
 # 3. Comprar entradas → eventId, se une a cola, espera turno, zonaId, cantidad
@@ -462,66 +538,64 @@ Al ejecutar, el script verifica que Keycloak y el backend responden. Primero int
   - Registre el error completo en los logs estructurados para observabilidad (Loki + Tempo traceId)
   - Exponga el traceId en la respuesta al cliente para correlación
 
-## Provisioning (Remote K3s)
+## Performance & Scaling Insights
+
+### Key metrics
+
+| Metric | Meaning | Target |
+|--------|---------|--------|
+| **p50 (median)** | The 50th percentile — half the requests are faster than this | User-facing perception |
+| **p95** | 95% of requests complete under this time — the real user experience | `<200ms` for reads, `<5s` for purchases |
+| **p99** | 99th percentile — the long tail | Monitor for outliers |
+| **error rate** | Percentage of failed requests | `<1%` |
+| **throughput** | Requests per second the system handles | Depends on scale |
+
+> **p95 matters more than average.** The average hides problems: a few very slow requests pull it up only slightly. p95 shows what 95% of your users actually experience.
+
+### Scaling observations (k6 load tests)
+
+| Scenario | VUs | Pods | p95 | Errors | Bottleneck |
+|----------|-----|------|-----|--------|------------|
+| Catalog read | 5000 | 1 | — | 99.88% | Rate limiter (Traefik) |
+| Catalog read | 1000 | 1 | 9.26s | 0% | Single pod CPU |
+| Catalog read | 1000 | 2 | 16.41s | 0% | **Database contention** |
+
+**Key findings:**
+
+- **Removing rate limit from `/graphql` eliminated all errors** — read traffic should never be throttled
+- **Scaling to 2 pods improved median from 5.5s → 1.0s** (5x) but p95 worsened
+- **The bottleneck is now the databases** (MongoDB + PostgreSQL), not the application pods
+- Both pods compete for the same database connections, causing queuing at peak
+
+### Next steps for higher throughput
+
+1. **Connection pooling** — Add PgBond piscina (PgBouncer) to multiplex database connections. Currently 2 pods × 20 Hikari connections = 40 concurrent connections to PostgreSQL. PgBouncer in transaction mode can handle thousands of client connections over a few real DB connections.
+2. **Read replicas** — Offload catalog reads to MongoDB replicas / PostgreSQL read replicas
+3. **Query optimisation** — Check `pg_stat_statements` for slow queries and missing indexes
+4. **HPA tuning** — Increase `minReplicas` and adjust CPU/memory targets based on real load
 
 ```bash
 # 1. Provision K3s cluster
-./scripts/provision-k3s.sh -u user@host -d domain.com
+./deploy/k3s/k3s-provision.sh janrax@janrax.es janrax.es
 
-# 2. Deploy infrastructure
-./scripts/provision-infra.sh -u user@host -d domain.com
+# 2. Deploy infrastructure + observability
+./deploy/k3s/k3s-infrastructure.sh janrax@janrax.es janrax.es
 
-# 3. Deploy application + run tests
-./scripts/provision-services.sh -u user@host -d domain.com
+# 3. Deploy the monolith
+./deploy/k3s/k3s-publish-app.sh janrax@janrax.es janrax.es latest
+
+# Or all at once:
+./deploy/k3s/deploy.sh janrax@janrax.es janrax.es latest
 ```
 
-ejemplos de llamadas. BORRAR ----
-```sh
-1394  ADMIN_TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=ticket-monster-app" \
-  -d "username=admin" -d "password=admin" \
-  -d "grant_type=password" | jq -r '.access_token')
- 1395  curl -s http://localhost:8080/graphql   -H "Authorization: Bearer $ADMIN_TOKEN"   -H "Content-Type: application/json"   -d '{"query":"mutation { createArtist(input: { name: \"Foo Fighters\", genre: \"Rock\" }) { id name } }"}' | jq .
- 1396  VENUE_RESP=$(curl -s http://localhost:8080/graphql \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"mutation { createVenue(input: { name: \"Wembley\", totalCapacity: 90000 }) { id name } }"}')
- 1397  VENUE_ID=$(echo "$VENUE_RESP" | jq -r '.data.createVenue.id')
- 1398  echo "VENUE_ID=$VENUE_ID"
- 1399  EVENT_RESP=$(curl -s http://localhost:8080/graphql \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"query\":\"mutation { createEvent(input: { name: \\\"Foo Fighters Live\\\", type: CONCERT, date: \\\"2025-12-25T22:00:00\\\", venueId: \\\"$VENUE_ID\\\", zones: [{ name: \\\"Pista\\\", capacity: 40000, price: 80.0 }, { name: \\\"Grada\\\", capacity: 30000, price: 120.0 }] }) { id name status zones { id name capacity price } } }\"}")
- 1400  EVENT_ID=$(echo "$EVENT_RESP" | jq -r '.data.createEvent.id')
- 1401  ZONE_ID=$(echo "$EVENT_RESP" | jq -r '.data.createEvent.zones[0].id')
- 1402  echo "EVENT_ID=$EVENT_ID  ZONE_ID_PISTA=$ZONE_ID"
- 1403  curl -s http://localhost:8080/graphql   -H "Authorization: Bearer $ADMIN_TOKEN"   -H "Content-Type: application/json"   -d "{\"query\":\"mutation { updateEvent(id: \\\"$EVENT_ID\\\", input: { status: PUBLISHED }) { id name status } }\"}" | jq .
- 1404  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d '{"query":"{ events(page:0, size:10) { content { id name venue { name } zones { id name capacity price } } } }"}' | jq .
- 1405  USER_TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=ticket-monster-app" \
-  -d "username=user" -d "password=user" \
-  -d "grant_type=password" | jq -r '.access_token')
- 1406  curl -s -X POST "http://localhost:8080/api/v1/queue/$EVENT_ID/join"   -H "Authorization: Bearer $USER_TOKEN"   -H "Content-Type: application/json" | jq .
- 1407  curl -s "http://localhost:8080/api/v1/queue/$EVENT_ID/status"   -H "Authorization: Bearer $USER_TOKEN" | jq .
- 1408  curl -s "http://localhost:8080/api/v1/queue/$EVENT_ID/token"   -H "Authorization: Bearer $USER_TOKEN" | jq .
- 1409  RESERVATION=$(curl -s -X POST "http://localhost:8080/api/v1/reservations" \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"eventId\":\"$EVENT_ID\",\"items\":[{\"zoneId\":\"$ZONE_ID\",\"quantity\":2}]}")
- 1410  RESERVATION_ID=$(echo "$RESERVATION" | jq -r '.id')
- 1411  echo "RESERVATION_ID=$RESERVATION_ID"
- 1412  PAYMENT=$(curl -s -X POST "http://localhost:8080/api/v1/payments" \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"reservationId\":\"$RESERVATION_ID\",\"amount\":160.0}")
- 1413  PAYMENT_ID=$(echo "$PAYMENT" | jq -r '.id')
- 1414  echo "PAYMENT_ID=$PAYMENT_ID"
- 1415  curl -s -X POST "http://localhost:8080/api/v1/payments/$PAYMENT_ID/confirm"   -H "Authorization: Bearer $USER_TOKEN"   -H "Content-Type: application/json"   -d "{\"idempotencyKey\":\"test-$(date +%s)\"}" | jq .
- 1416  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d "{\"query\":\"{ availability(eventId: \\\"$EVENT_ID\\\") { zoneName totalCapacity reservedCount availableCount } }\"}" | jq .
- 1417  curl -s http://localhost:8080/graphql   -H "Content-Type: application/json"   -d '{"query":"mutation { deleteEvent(id: \"x\") }"}' | jq .
-
-
+Images are built and pushed to GitHub Container Registry via the manual workflow:
+`.github/workflows/docker-publish.yml` → `ghcr.io/jrgavilanes/ticket-monster:<version>`.
 
 ```
+
+## TODO / Improvements
+
+- **Eliminar hardcoded `janrax.es`** — parametrizar para cualquier dominio:
+  - `deploy/k3s/k3s-publish-app.sh` → `--set env.KEYCLOAK_ISSUER_URI`, `--set env.KEYCLOAK_JWK_SET_URI` (se sobreescriben bien, pero `values.yaml` tiene defaults hardcodeados)
+  - `deploy/k3s/charts/ticketmonster/values.yaml` → `ingress.host`, `KEYCLOAK_ISSUER_URI`, `KEYCLOAK_JWK_SET_URI`
+  - `frontend/frontend.sh` → `DEFAULT_BASE`, `DEFAULT_KEYCLOAK` (ya configurable por argumento, default hardcodeado)```

@@ -1,0 +1,10 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ticket-monster-rate-limit
+  namespace: {{ .Values.namespace }}
+spec:
+  rateLimit:
+    average: {{ .Values.rateLimit.average }}
+    burst: {{ .Values.rateLimit.burst }}
+    period: {{ .Values.rateLimit.period }}

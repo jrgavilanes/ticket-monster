@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - port: {{ .Values.port }}
+      targetPort: {{ .Values.port }}
+      name: kafka
+    - port: {{ .Values.adminApiPort }}
+      targetPort: {{ .Values.adminApiPort }}
+      name: admin
+  selector:
+    app: redpanda

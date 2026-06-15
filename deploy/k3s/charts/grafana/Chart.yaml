@@ -1,0 +1,6 @@
+apiVersion: v2
+name: grafana
+description: Grafana observability dashboard for Ticket Monster
+version: 0.1.0
+appVersion: "12.4.4"
+type: application

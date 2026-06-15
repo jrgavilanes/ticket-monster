@@ -10,7 +10,7 @@ export const options = {
     },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 
 const EVENTS_QUERY = JSON.stringify({
     query: `{

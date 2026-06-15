@@ -1,0 +1,14 @@
+namespace: infrastructure
+domain: example.com
+
+image:
+  repository: redpandadata/console
+  tag: v2.8.2
+
+port: 8080
+
+adminUser: admin
+secretName: redpanda-console-credentials
+passwordKey: admin-password
+
+kafkaBrokers: redpanda.infrastructure.svc.cluster.local:9092

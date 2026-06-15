@@ -1,0 +1,61 @@
+{
+  "realm": "ticket-monster",
+  "enabled": true,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      { "name": "USER", "description": "Regular user" },
+      { "name": "ADMIN", "description": "Administrator" }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@ticketmonster.local",
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        { "type": "password", "value": "admin", "temporary": false }
+      ],
+      "realmRoles": ["USER", "ADMIN"]
+    },
+    {
+      "username": "user",
+      "enabled": true,
+      "email": "user@ticketmonster.local",
+      "firstName": "Regular",
+      "lastName": "User",
+      "credentials": [
+        { "type": "password", "value": "user", "temporary": false }
+      ],
+      "realmRoles": ["USER"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "ticket-monster-app",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["http://localhost:*"],
+      "webOrigins": ["http://localhost:*"]
+    },
+    {
+      "clientId": "api-gateway",
+      "enabled": true,
+      "publicClient": false,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "api-gateway-secret"
+    }
+  ],
+  "scopeMappings": [
+    {
+      "client": "ticket-monster-app",
+      "roles": ["USER", "ADMIN"]
+    }
+  ]
+}

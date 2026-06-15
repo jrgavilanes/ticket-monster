@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: {{ .Values.adminUser }}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.adminSecretName }}
+                  key: {{ .Values.adminPasswordKey }}
+            - name: GF_SERVER_ROOT_URL
+              value: "https://{{ .Values.domain }}{{ .Values.subPath }}"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+          ports:
+            - containerPort: {{ .Values.port }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: data
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-ds
+            items:
+              - key: datasources.yml
+                path: datasources.yml
+        - name: data
+          persistentVolumeClaim:
+            claimName: grafana-data

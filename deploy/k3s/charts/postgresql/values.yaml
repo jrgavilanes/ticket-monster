@@ -1,0 +1,15 @@
+namespace: infrastructure
+
+image:
+  repository: postgres
+  tag: 16-alpine
+
+user: ticketmonster
+database: ticketmonster
+
+secretName: postgresql-credentials
+passwordKey: ticketmonster-password
+
+storage: 10Gi
+
+port: 5432

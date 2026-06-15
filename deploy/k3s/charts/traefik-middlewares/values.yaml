@@ -1,0 +1,16 @@
+namespace: ticket-monster
+
+rateLimit:
+  average: 100
+  burst: 200
+  period: 1s
+
+headers:
+  browserXssFilter: true
+  contentTypeNosniff: true
+  frameDeny: true
+  stsSeconds: 63072000
+  stsIncludeSubdomains: true
+  stsPreload: true
+  forceSTSHeader: true
+  customFrameOptionsValue: DENY

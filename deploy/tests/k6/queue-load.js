@@ -10,7 +10,7 @@ export const options = {
     },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 const EVENT_ID = __ENV.EVENT_ID || 'test-event-1';
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || '';
 

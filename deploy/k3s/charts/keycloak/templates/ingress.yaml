@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: {{ .Values.namespace }}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-redirect-to-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - {{ .Values.domain }}
+      secretName: {{ .Values.domain | replace "." "-" }}-tls
+  rules:
+    - host: {{ .Values.domain }}
+      http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: {{ .Values.port }}

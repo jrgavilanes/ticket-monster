@@ -1,0 +1,13 @@
+namespace: infrastructure
+
+image:
+  repository: redpandadata/redpanda
+  tag: v24.3.5
+
+storage: 10Gi
+
+port: 9092
+adminApiPort: 9644
+
+smp: 1
+memory: 512M

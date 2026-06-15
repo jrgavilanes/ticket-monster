@@ -47,38 +47,21 @@ if [[ "${RUN_TESTS_ONLY}" == "false" ]]; then
         -f "${PROJECT_DIR}/backend/ticketmonster/Dockerfile" \
         "${PROJECT_DIR}/backend/ticketmonster"
 
-    echo "==> Building api-gateway Docker image..."
-    docker build -t "${REGISTRY}/api-gateway:latest" \
-        -f "${PROJECT_DIR}/backend/api-gateway/Dockerfile" \
-        "${PROJECT_DIR}/backend/api-gateway"
-
-    echo "==> Pushing images to registry..."
+    echo "==> Pushing image to registry..."
     docker push "${REGISTRY}/ticketmonster:latest"
-    docker push "${REGISTRY}/api-gateway:latest"
 
     echo ""
     echo "==> Deploying ticketmonster..."
-    helm upgrade --install ticketmonster "${PROJECT_DIR}/deploy/charts/ticketmonster" \
+    helm upgrade --install ticketmonster "${PROJECT_DIR}/deploy/k3s/charts/ticketmonster" \
         --namespace ticket-monster \
         --set image.repository="${REGISTRY}/ticketmonster" \
         --set image.tag=latest \
-        --set ingress.host="api.${DOMAIN}" \
+        --set ingress.host="${DOMAIN}" \
         --wait --timeout 5m
 
     echo ""
-    echo "==> Deploying api-gateway..."
-    helm upgrade --install api-gateway "${PROJECT_DIR}/deploy/charts/api-gateway" \
-        --namespace ticket-monster \
-        --set image.repository="${REGISTRY}/api-gateway" \
-        --set image.tag=latest \
-        --set ingress.host="gateway.${DOMAIN}" \
-        --set monolithUri="http://ticketmonster.ticket-monster.svc.cluster.local:8082" \
-        --wait --timeout 5m
-
-    echo ""
-    echo "==> Waiting for all pods to be ready..."
+    echo "==> Waiting for pods to be ready..."
     kubectl wait --for=condition=ready pod -l app=ticketmonster -n ticket-monster --timeout=120s
-    kubectl wait --for=condition=ready pod -l app=api-gateway -n ticket-monster --timeout=120s
     echo "==> All pods ready"
 fi
 
@@ -106,7 +89,6 @@ fi
 echo ""
 echo "==> Services deployment complete!"
 echo "    Domain:      ${DOMAIN}"
-echo "    API Gateway: https://gateway.${DOMAIN}"
-echo "    Monolith:    https://api.${DOMAIN}"
+echo "    Monolith:    https://${DOMAIN}"
 echo ""
 kubectl get pods -n ticket-monster

@@ -1,0 +1,53 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/jrgavilanes/ticket-monster
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8082
+
+ingress:
+  enabled: true
+  className: traefik
+  host: janrax.es
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticket-monster-rate-limit@kubernetescrd,ticket-monster-ticket-monster-secure-headers@kubernetescrd
+  graphqlAnnotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticket-monster-secure-headers@kubernetescrd
+  tls: true
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  POSTGRES_HOST: postgresql.infrastructure.svc.cluster.local
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ticketmonster
+  POSTGRES_USER: ticketmonster
+  MONGO_HOST: mongodb.infrastructure.svc.cluster.local
+  MONGO_PORT: "27017"
+  MONGO_DB: ticketmonster_catalog
+  REDIS_HOST: redis.infrastructure.svc.cluster.local
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP_SERVERS: redpanda.infrastructure.svc.cluster.local:9092
+  KEYCLOAK_ISSUER_URI: https://janrax.es/auth/realms/ticket-monster
+  KEYCLOAK_JWK_SET_URI: https://janrax.es/auth/realms/ticket-monster/protocol/openid-connect/certs
+  RESERVATION_SCHEMA: reservation
+  PAYMENT_SCHEMA: payment

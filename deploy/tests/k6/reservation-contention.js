@@ -9,12 +9,10 @@ export const options = {
     },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 const EVENT_ID = __ENV.EVENT_ID || 'test-event-1';
 const ZONE_ID = __ENV.ZONE_ID || 'zone-vip';
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || '';
-const QUEUE_TOKEN = __ENV.QUEUE_TOKEN || '';
-
 export default function () {
     const payload = JSON.stringify({
         eventId: EVENT_ID,
@@ -28,7 +26,6 @@ export default function () {
             headers: {
                 'Authorization': `Bearer ${AUTH_TOKEN}`,
                 'Content-Type': 'application/json',
-                'X-Queue-Token': QUEUE_TOKEN,
             },
         }
     );

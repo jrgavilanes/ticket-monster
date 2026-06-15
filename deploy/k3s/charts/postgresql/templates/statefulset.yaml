@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  serviceName: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      containers:
+        - name: postgresql
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.user }}
+            - name: POSTGRES_DB
+              value: {{ .Values.database }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: {{ .Values.passwordKey }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: {{ .Values.port }}
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.user }}]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.storage }}

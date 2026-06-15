@@ -1,0 +1,6 @@
+apiVersion: v2
+name: redpanda
+description: Redpanda streaming platform for Ticket Monster
+version: 0.1.0
+appVersion: "v24.3.5"
+type: application
