@@ -394,12 +394,31 @@ k6 run -o experimental-prometheus-rw --tag testid=reservation-contention \
 
 #### Run against production (janrax.es)
 
+> **⚠️ Remote write limitation:** Prometheus remote write endpoint (`/api/v1/write`) is a ClusterIP service not exposed externally. You **cannot** write directly to `https://janrax.es/api/v1/write`. Use a `kubectl port-forward` tunnel instead:
+
 ```bash
-K6_PROMETHEUS_RW_SERVER_URL=https://janrax.es/api/v1/write \
+# Terminal 1 (VPS) — expose Prometheus locally
+kubectl port-forward -n observability prometheus-0 9090:9090
+
+# Terminal 2 (local) — k6 pushes to local tunnel
+K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
 K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
 k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
   --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
 ```
+
+Or run k6 directly on the VPS (no tunnel needed, writes to `localhost:9090`):
+
+```bash
+scp deploy/tests/k6/catalog-read.js janrax@janrax.es:/tmp/
+ssh janrax@janrax.es
+k6 run /tmp/catalog-read.js -u 100 -d 30s \
+  --env BASE_URL=https://janrax.es \
+  -o experimental-prometheus-rw \
+  --tag testid=catalog-read
+```
+
+> **Tip:** In local Docker Compose, Prometheus is exposed on `localhost:9090` — no tunnel needed. The issue only applies to K3s where Prometheus is a ClusterIP service.
 
 For authenticated tests, get a token from the remote Keycloak and set `AUTH_TOKEN`:
 ```bash
