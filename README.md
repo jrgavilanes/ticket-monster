@@ -241,12 +241,17 @@ flowchart TB
 - JDK 21
 - Gradle 9.5+
 
-### 1. Start everything (infrastructure + app)
+### 1. Start everything (infrastructure + app + observability)
 ```bash
 docker compose --profile app up -d
 ```
 
 This builds and starts the monolith (`ticketmonster` on `:8082`) plus all infrastructure: PostgreSQL, MongoDB, Redis, Redpanda, Keycloak, Prometheus, Loki, Tempo, and Grafana.
+
+> **Important:** If you only rebuild the app with `docker compose --profile app up -d --build ticketmonster`, the observability stack (Prometheus, Loki, Tempo, Grafana) will **not** start because `ticketmonster` does not depend on them. Start them explicitly:
+> ```bash
+> docker compose --profile app up -d prometheus loki tempo grafana
+> ```
 
 ### 2. Run the app natively (outside Docker)
 ```bash
@@ -282,6 +287,9 @@ docker build -t ticket-monster:local \
 Rebuild and restart after code changes:
 ```bash
 docker compose --profile app up -d --build ticketmonster
+
+# Also restart observability if not already running:
+docker compose --profile app up -d prometheus loki tempo grafana
 ```
 
 ### 4. Get an access token
@@ -337,17 +345,23 @@ Install k6 (Debian 13 / Trixie):
 ```bash
 sudo apt-get update && sudo apt-get install -y gnupg
 curl -fsSL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6.gpg
-echo "deb [signed-by=/usr/share/keyrings/k6.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+echo "deb [signed-by=/usr/share/keyrings/k6.gpg] https://dl.k6.io/deb stable main" sudo tee /etc/apt/sources.list.d/k6.list
 sudo apt-get update && sudo apt-get install -y k6
 ```
 
-Prerequisites: infra + app running:
+Prerequisites: infra + app + observability running:
 ```bash
-docker compose --profile app up -d
+docker compose --profile app up -d prometheus loki tempo grafana
 ```
 
+k6 can push metrics to Prometheus in real-time via the `experimental-prometheus-rw` output. Results appear on the **k6 Prometheus** dashboard in Grafana.
+
+```bash
 # 1. Catalog read (public, no auth needed)
-k6 run deploy/tests/k6/catalog-read.js
+K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
+K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
+k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
+  deploy/tests/k6/catalog-read.js
 
 # 2. Queue join (requires auth + real event)
 TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
@@ -360,20 +374,51 @@ EVENT_ID=$(curl -s http://localhost:8082/graphql \
   -H "Content-Type: application/json" \
   -d '{"query":"{ events(page: 0, size: 1) { content { id } } }"}' | jq -r '.data.events.content[0].id')
 
-k6 run --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" deploy/tests/k6/queue-load.js
+K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
+K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
+k6 run -o experimental-prometheus-rw --tag testid=queue-load \
+  --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" \
+  deploy/tests/k6/queue-load.js
 
 # 3. Reservation contention (requires event with zone stock)
-k6 run --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" --env ZONE_ID="<zone-id>" deploy/tests/k6/reservation-contention.js
+K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
+K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
+k6 run -o experimental-prometheus-rw --tag testid=reservation-contention \
+  --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" --env ZONE_ID="<zone-id>" \
+  deploy/tests/k6/reservation-contention.js
 ```
 
 > **Note:** Defaults are `BASE_URL=http://localhost:8082`. Override with `--env BASE_URL=<url>`.
-> Reduce VUs for local runs (e.g. `--vus 100 --duration 10s`).  The defaults (5k–10k VUs) target CI/production.
+> Reduce VUs for local runs (e.g. `--vus 100 --duration 10s`). The defaults (5k–10k VUs) target CI/production.
+> Metrics appear in Grafana → **k6 Prometheus** dashboard at http://localhost:3000
 
 #### Run against production (janrax.es)
 
+> **⚠️ Remote write limitation:** Prometheus remote write endpoint (`/api/v1/write`) is a ClusterIP service not exposed externally. You **cannot** write directly to `https://janrax.es/api/v1/write`. Use a `kubectl port-forward` tunnel instead:
+
 ```bash
-k6 run --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
+# Terminal 1 (VPS) — expose Prometheus locally
+kubectl port-forward -n observability prometheus-0 9090:9090
+
+# Terminal 2 (local) — k6 pushes to local tunnel
+K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
+K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
+k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
+  --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
 ```
+
+Or run k6 directly on the VPS (no tunnel needed, writes to `localhost:9090`):
+
+```bash
+scp deploy/tests/k6/catalog-read.js janrax@janrax.es:/tmp/
+ssh janrax@janrax.es
+k6 run /tmp/catalog-read.js -u 100 -d 30s \
+  --env BASE_URL=https://janrax.es \
+  -o experimental-prometheus-rw \
+  --tag testid=catalog-read
+```
+
+> **Tip:** In local Docker Compose, Prometheus is exposed on `localhost:9090` — no tunnel needed. The issue only applies to K3s where Prometheus is a ClusterIP service.
 
 For authenticated tests, get a token from the remote Keycloak and set `AUTH_TOKEN`:
 ```bash
@@ -387,7 +432,11 @@ EVENT_ID=$(curl -s https://janrax.es/graphql \
   -H "Content-Type: application/json" \
   -d '{"query":"{ events(page: 0, size: 1) { content { id } } }"}' | jq -r '.data.events.content[0].id')
 
-k6 run --env BASE_URL=https://janrax.es --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" deploy/tests/k6/queue-load.js
+K6_PROMETHEUS_RW_SERVER_URL=https://janrax.es/api/v1/write \
+K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
+k6 run -o experimental-prometheus-rw --tag testid=queue-load \
+  --env BASE_URL=https://janrax.es --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" \
+  deploy/tests/k6/queue-load.js
 ```
 
 ---
@@ -554,25 +603,29 @@ El script detecta automáticamente si eres administrador o usuario regular y mue
 
 ### Scaling observations (k6 load tests)
 
-| Scenario | VUs | Pods | p95 | Errors | Bottleneck |
-|----------|-----|------|-----|--------|------------|
-| Catalog read | 5000 | 1 | — | 99.88% | Rate limiter (Traefik) |
-| Catalog read | 1000 | 1 | 9.26s | 0% | Single pod CPU |
-| Catalog read | 1000 | 2 | 16.41s | 0% | **Database contention** |
+Resultados de pruebas de carga local con k6 → Prometheus remote write (GraphQL catalog reads, 1 pod Docker):
 
-**Key findings:**
+| Escenario | VUs | Throughput | p95 | Avg | Errors | Observación |
+|-----------|-----|-----------|-----|-----|--------|-------------|
+| **Baja** | 100 | 877 req/s | **31ms** | 12ms | 0% | ✅ Responde excelente |
+| **Media** | 500 | — | — | — | 0% | Latencia dentro de target |
+| **Alta** | 2000 | 2.336 req/s | **1.41s** | 744ms | 0% | ❌ p95 supera 200ms target |
+| **Máxima** | 5000 | 2.512 req/s | **3.93s** | 1.81s | 0% | ❌ VUs efectivas se estancan en ~3.068 |
 
-- **Removing rate limit from `/graphql` eliminated all errors** — read traffic should never be throttled
-- **Scaling to 2 pods improved median from 5.5s → 1.0s** (5x) but p95 worsened
-- **The bottleneck is now the databases** (MongoDB + PostgreSQL), not the application pods
-- Both pods compete for the same database connections, causing queuing at peak
+**Hallazgos clave:**
 
-### Next steps for higher throughput
+- **A baja carga (100 VUs) el sistema responde en 31ms p95** — el monolito + BDs aguantan sin esfuerzo.
+- **El cuello de botella está en ~2.300 req/s.** De 100→2000 VUs el throughput se multiplicó por 2.7×, pero de 2000→5000 VUs solo subió un 7% adicional (2.336→2.512 req/s). La latencia se disparó: p95 pasó de 31ms → 1.41s → 3.93s.
+- **En 5000 VUs el sistema no pudo mantener la carga** — solo ejecutó con ~3.068 VUs efectivos de 5.000. Las VUs restantes quedaron encoladas esperando respuesta del servidor.
+- **0% de errores en todos los tests.** El sistema degrada gracefulmente sin romperse — las conexiones se encolan, no se rechazan.
+- **El bottleneck es la contención en base de datos** (PostgreSQL + MongoDB compiten por conexiones HikariCP). Coincide con los tests en K3s.
 
-1. **Connection pooling** — Add PgBond piscina (PgBouncer) to multiplex database connections. Currently 2 pods × 20 Hikari connections = 40 concurrent connections to PostgreSQL. PgBouncer in transaction mode can handle thousands of client connections over a few real DB connections.
-2. **Read replicas** — Offload catalog reads to MongoDB replicas / PostgreSQL read replicas
-3. **Query optimisation** — Check `pg_stat_statements` for slow queries and missing indexes
-4. **HPA tuning** — Increase `minReplicas` and adjust CPU/memory targets based on real load
+### Próximos pasos para mayor throughput
+
+1. **Connection pooling** — Añadir PgBouncer para multiplexar conexiones a PostgreSQL. Actualmente 1 pod × 20 conexiones Hikari = 20 conexiones concurrentes. PgBouncer en modo transaction puede manejar miles de conexiones cliente sobre pocas conexiones reales a la BD.
+2. **Read replicas** — Separar lecturas de catálogo a réplicas de MongoDB / PostgreSQL.
+3. **Optimización de queries** — Revisar `pg_stat_statements` para detectar queries lentas e índices faltantes.
+4. **HPA tuning** — En K3s, aumentar `minReplicas` y ajustar targets de CPU/memoria.
 
 ```bash
 # 1. Provision K3s cluster

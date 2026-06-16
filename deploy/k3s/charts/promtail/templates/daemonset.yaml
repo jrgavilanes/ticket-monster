@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: promtail
+spec:
+  selector:
+    matchLabels:
+      app: promtail
+  template:
+    metadata:
+      labels:
+        app: promtail
+    spec:
+      serviceAccountName: promtail
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+      volumes:
+        - name: config
+          configMap:
+            name: promtail-config
+        - name: run
+          hostPath:
+            path: /run/promtail
+        - name: pods
+          hostPath:
+            path: /var/log/pods
+        - name: containers
+          hostPath:
+            path: /var/log/containers
+      containers:
+        - name: promtail
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args:
+            - -config.file=/etc/promtail/config.yml
+          volumeMounts:
+            - name: config
+              mountPath: /etc/promtail
+            - name: run
+              mountPath: /run/promtail
+            - name: pods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: containers
+              mountPath: /var/log/containers
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

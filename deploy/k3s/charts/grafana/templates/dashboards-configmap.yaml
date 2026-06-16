@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: {{ .Values.namespace }}
+data:
+  {{- range $path, $content := .Files.Glob "dashboards/*.json" }}
+  {{ base $path }}: |
+    {{- $content | toString | nindent 4 }}
+  {{- end }}

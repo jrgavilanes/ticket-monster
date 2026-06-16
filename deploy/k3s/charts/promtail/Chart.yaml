@@ -1,0 +1,6 @@
+apiVersion: v2
+name: promtail
+description: Promtail DaemonSet for shipping pod logs to Loki
+version: 0.1.0
+appVersion: "3.4.2"
+type: application

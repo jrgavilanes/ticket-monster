@@ -136,6 +136,9 @@ helm_install prometheus \"\$CHARTS/prometheus\" observability
 step \"Deploying Loki...\"
 helm_install loki \"\$CHARTS/loki\" observability
 
+step \"Deploying Promtail...\"
+helm_install promtail \"\$CHARTS/promtail\" observability
+
 step \"Deploying Tempo...\"
 helm_install tempo \"\$CHARTS/tempo\" observability
 

@@ -1,0 +1,47 @@
+namespace: observability
+
+image:
+  repository: grafana/promtail
+  tag: 3.4.2
+
+lokiAddress: http://loki.observability.svc.cluster.local:3100
+
+config: |
+  server:
+    http_listen_port: 9080
+    grpc_listen_port: 0
+
+  positions:
+    filename: /run/promtail/positions.yaml
+
+  clients:
+    - url: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+
+  scrape_configs:
+    - job_name: kubernetes-pods
+      pipeline_stages:
+        - cri: {}
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_controller_kind]
+          action: keep
+          regex: (ReplicaSet|DaemonSet|Job|StatefulSet)
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          target_label: app
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          target_label: app
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          target_label: node
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_container_name]
+          target_label: container
+        - replacement: /var/log/pods/*$1/*.log
+          separator: /
+          source_labels:
+            - __meta_kubernetes_pod_uid
+            - __meta_kubernetes_pod_container_name
+          target_label: __path__
