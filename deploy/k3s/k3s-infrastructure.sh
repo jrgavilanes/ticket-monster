@@ -133,10 +133,13 @@ helm_install keycloak \"\$CHARTS/keycloak\" infrastructure \
 step \"Deploying Prometheus...\"
 helm_install prometheus \"\$CHARTS/prometheus\" observability
 
-step \"Deploying Loki...\"
-helm_install loki \"\$CHARTS/loki\" observability
+step "Deploying Loki..."
+helm_install loki "$CHARTS/loki" observability
 
-step \"Deploying Tempo...\"
+step "Deploying Promtail..."
+helm_install promtail "$CHARTS/promtail" observability
+
+step "Deploying Tempo..."
 helm_install tempo \"\$CHARTS/tempo\" observability
 
 step \"Deploying Grafana...\"
