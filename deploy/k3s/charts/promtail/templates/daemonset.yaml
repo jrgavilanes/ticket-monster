@@ -34,6 +34,11 @@ spec:
       containers:
         - name: promtail
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           args:
             - -config.file=/etc/promtail/config.yml
           volumeMounts:

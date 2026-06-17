@@ -40,6 +40,6 @@ datasources: |
       url: http://tempo.observability.svc.cluster.local:3200
       editable: true
       jsonData:
-        httpMethod: GET
+        httpMethod: POST
         serviceMap:
           datasourceUid: prometheus
