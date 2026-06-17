@@ -611,6 +611,12 @@ Resultados de pruebas de carga local con k6 → Prometheus remote write (GraphQL
 | **Media** | 500 | — | — | — | 0% | Latencia dentro de target |
 | **Alta** | 2000 | 2.336 req/s | **1.41s** | 744ms | 0% | ❌ p95 supera 200ms target |
 | **Máxima** | 5000 | 2.512 req/s | **3.93s** | 1.81s | 0% | ❌ VUs efectivas se estancan en ~3.068 |
+| **Remoto (janrax.es)** | 500 | 677 req/s | **1.55s** | 606ms | 0% | ❌ p95 supera 200ms target |
+
+Comando ejecutado:
+```bash
+k6 run --vus 500 --duration 30s deploy/tests/k6/catalog-read.js -e BASE_URL=https://janrax.es
+```
 
 **Hallazgos clave:**
 
