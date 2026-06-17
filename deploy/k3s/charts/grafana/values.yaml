@@ -29,9 +29,16 @@ datasources: |
 
     - name: Loki
       type: loki
+      uid: loki
       access: proxy
       url: http://loki.observability.svc.cluster.local:3100
       editable: true
+      jsonData:
+        derivedFields:
+          - datasourceUid: tempo
+            matcherRegex: "trace_id=(\\w+)"
+            name: TraceID
+            url: "$${__value.raw}"
 
     - name: Tempo
       type: tempo
@@ -40,6 +47,6 @@ datasources: |
       url: http://tempo.observability.svc.cluster.local:3200
       editable: true
       jsonData:
-        httpMethod: GET
+        httpMethod: POST
         serviceMap:
           datasourceUid: prometheus

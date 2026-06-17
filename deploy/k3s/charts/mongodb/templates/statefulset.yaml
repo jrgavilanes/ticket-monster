@@ -19,7 +19,7 @@ spec:
       containers:
         - name: mongodb
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          args: ["mongod", "--bind_ip_all"]
+          args: ["mongod", "--bind_ip_all", "--quiet"]
           env:
             - name: MONGO_INITDB_ROOT_USERNAME
               value: {{ .Values.user }}
@@ -40,7 +40,7 @@ spec:
                 - --eval
                 - "db.adminCommand('ping')"
             initialDelaySeconds: 10
-            periodSeconds: 5
+            periodSeconds: 30
           volumeMounts:
             - name: data
               mountPath: /data/db

@@ -37,6 +37,7 @@ autoscaling:
   targetMemoryUtilizationPercentage: 80
 
 env:
+  SPRING_PROFILES_ACTIVE: "k8s"
   POSTGRES_HOST: postgresql.infrastructure.svc.cluster.local
   POSTGRES_PORT: "5432"
   POSTGRES_DB: ticketmonster

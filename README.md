@@ -410,13 +410,21 @@ k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
 Or run k6 directly on the VPS (no tunnel needed, writes to `localhost:9090`):
 
 ```bash
-scp deploy/tests/k6/catalog-read.js janrax@janrax.es:/tmp/
-ssh janrax@janrax.es
-k6 run /tmp/catalog-read.js -u 100 -d 30s \
-  --env BASE_URL=https://janrax.es \
-  -o experimental-prometheus-rw \
-  --tag testid=catalog-read
+# Quick test (100 VUs, 30s)
+K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
+K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
+k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
+  --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
+
+# Stress test (5000 VUs, 30s) — espera latencia alta y throughput estancado a ~2500 req/s
+K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
+K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
+k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
+  --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js \
+  --vus 5000 --duration 30s
 ```
+
+> **Note:** `localhost:9090` on the VPS works because a `kubectl port-forward` to Prometheus is already running. If the tunnel is down, recreate it: `kubectl port-forward -n observability prometheus-0 9090:9090 &`
 
 > **Tip:** In local Docker Compose, Prometheus is exposed on `localhost:9090` — no tunnel needed. The issue only applies to K3s where Prometheus is a ClusterIP service.
 
@@ -603,29 +611,48 @@ El script detecta automáticamente si eres administrador o usuario regular y mue
 
 ### Scaling observations (k6 load tests)
 
-Resultados de pruebas de carga local con k6 → Prometheus remote write (GraphQL catalog reads, 1 pod Docker):
+Resultados de pruebas de carga con k6 → Prometheus remote write (GraphQL catalog reads):
+
+**Local (1 pod Docker):**
 
 | Escenario | VUs | Throughput | p95 | Avg | Errors | Observación |
 |-----------|-----|-----------|-----|-----|--------|-------------|
 | **Baja** | 100 | 877 req/s | **31ms** | 12ms | 0% | ✅ Responde excelente |
 | **Media** | 500 | — | — | — | 0% | Latencia dentro de target |
 | **Alta** | 2000 | 2.336 req/s | **1.41s** | 744ms | 0% | ❌ p95 supera 200ms target |
-| **Máxima** | 5000 | 2.512 req/s | **3.93s** | 1.81s | 0% | ❌ VUs efectivas se estancan en ~3.068 |
+| **Máxima** | 5000 | 2.512 req/s | **3.93s** | 1.81s | 0% | ❌ VUs efectivas estancadas en ~3.068 |
+
+**K3s VPS (1 pod, janrax.es):**
+
+| Escenario | VUs | Throughput | p95 | Avg | Errors | Observación |
+|-----------|-----|-----------|-----|-----|--------|-------------|
+| **Remoto 500** | 500 | 677 req/s | **1.55s** | 606ms | 0% | ❌ Latencia de red domina |
+| **Remoto 5K** | 5000 | 36 req/s | **32.38s** | 28.7s | **92.56%** | ❌ Colapso total — servidor devuelve HTML en vez de JSON |
+
+El test de 5K VUs contra K3s colapsó completamente: solo 2.994/5.000 VUs efectivas, 92% de requests fallaron con respuestas no-JSON (probablemente timeouts de Traefik o el app server saturó su thread pool). El throughput cayó de 267 req/s (100 VUs) a 36 req/s (5K VUs).
 
 **Hallazgos clave:**
 
 - **A baja carga (100 VUs) el sistema responde en 31ms p95** — el monolito + BDs aguantan sin esfuerzo.
 - **El cuello de botella está en ~2.300 req/s.** De 100→2000 VUs el throughput se multiplicó por 2.7×, pero de 2000→5000 VUs solo subió un 7% adicional (2.336→2.512 req/s). La latencia se disparó: p95 pasó de 31ms → 1.41s → 3.93s.
-- **En 5000 VUs el sistema no pudo mantener la carga** — solo ejecutó con ~3.068 VUs efectivos de 5.000. Las VUs restantes quedaron encoladas esperando respuesta del servidor.
-- **0% de errores en todos los tests.** El sistema degrada gracefulmente sin romperse — las conexiones se encolan, no se rechazan.
-- **El bottleneck es la contención en base de datos** (PostgreSQL + MongoDB compiten por conexiones HikariCP). Coincide con los tests en K3s.
+- **En 5K VUs contra K3s el sistema no aguanta** — 92% de fallos. 1 solo pod no tiene capacidad para 5K conexiones concurrentes. El connection pool de HikariCP (20 conexiones) y el thread pool de Tomcat se saturan.
+- **El test catalog-read.js solo golpea MongoDB** (GraphQL → Catalog Module → MongoDB). PostgreSQL no es el bottleneck aquí — es la capacidad de MongoDB + el thread pool del monolito.
+- **0% de errores en tests locales hasta 5K VUs.** El sistema degrada gracefulmente sin romperse — las conexiones se encolan, no se rechazan. En K3s con 5K VUs, el colapso es total.
+- **El error `invalid character 'G'`** indica que el servidor devolvió HTML (página de error) en vez de JSON — probablemente Traefik devolviendo 502/504 al superar el timeout del backend.
 
 ### Próximos pasos para mayor throughput
 
-1. **Connection pooling** — Añadir PgBouncer para multiplexar conexiones a PostgreSQL. Actualmente 1 pod × 20 conexiones Hikari = 20 conexiones concurrentes. PgBouncer en modo transaction puede manejar miles de conexiones cliente sobre pocas conexiones reales a la BD.
-2. **Read replicas** — Separar lecturas de catálogo a réplicas de MongoDB / PostgreSQL.
-3. **Optimización de queries** — Revisar `pg_stat_statements` para detectar queries lentas e índices faltantes.
-4. **HPA tuning** — En K3s, aumentar `minReplicas` y ajustar targets de CPU/memoria.
+1. **Escalar pods del monolito** — 3 réplicas de ticketmonster distribuyen la carga y multiplican el thread pool ×3. Con HPA activo, escala automáticamente bajo carga.
+2. **PgBouncer** — Aunque el test catalog-read no usa PostgreSQL, los tests de escritura (reservations, payments) sí. PgBouncer multiplexa conexiones: en vez de N pods × 20 conexiones HikariCP directas a PG, PgBouncer las consolida en ~10-20 conexiones reales. Sin PgBouncer, 3 pods = 60 conexiones directas compitiendo en PostgreSQL.
+3. **MongoDB replica set (3 nodos)** — El catálogo es read-heavy. Un replica set permite distribuir lecturas entre secondaries. Las escrituras (poco frecuentes en catálogo) van al primary. Con 3 nodos, el throughput de lectura se multiplica.
+4. **Optimización de queries** — Revisar `pg_stat_statements` y MongoDB profiler para detectar queries lentas e índices faltantes.
+5. **HPA tuning** — En K3s, activar HPA (`autoscaling.enabled: true`) y ajustar targets de CPU/memoria para escalar automáticamente bajo carga.
+
+> **¿3 MongoDB + PgBouncer + 3 ticketmonsters mejorarían el test de 5K VUs?**
+>
+> Para el test catalog-read.js (solo GraphQL → MongoDB): **3 pods del monolito + 3 MongoDB en replica set** es la combinación ganadora. 3 pods × thread pool distribuyen las 5K conexiones concurrentes, y el replica set de MongoDB permite leer desde secondaries. PgBouncer no afecta este test específico porque no toca PostgreSQL.
+>
+> Para el sistema completo (reservations, payments, queue): **PgBouncer es crítico** para no saturar PostgreSQL con 60+ conexiones directas desde 3 pods.
 
 ```bash
 # 1. Provision K3s cluster
