@@ -407,16 +407,19 @@ k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
   --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
 ```
 
-Or run k6 directly on the VPS (no tunnel needed, writes to `localhost:9090`):
+Or run k6 directly on the VPS (same machine as the cluster). **You still need the port-forward** because Prometheus is a `ClusterIP` service and is not exposed on the host:
 
 ```bash
-# Quick test (100 VUs, 30s)
+# Terminal 1 (VPS) — keep this running in background
+kubectl port-forward -n observability svc/prometheus 9090:9090 &
+
+# Terminal 2 (VPS) — run the test
 K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
 K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
 k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
   --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
 
-# Stress test (5000 VUs, 30s) — espera latencia alta y throughput estancado a ~2500 req/s
+# Stress test (5000 VUs, 30s)
 K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
 K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
 k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
@@ -424,9 +427,9 @@ k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
   --vus 5000 --duration 30s
 ```
 
-> **Note:** `localhost:9090` on the VPS works because a `kubectl port-forward` to Prometheus is already running. If the tunnel is down, recreate it: `kubectl port-forward -n observability prometheus-0 9090:9090 &`
+> **Why is this needed?** Prometheus runs inside K3s as a `ClusterIP` service at `prometheus.observability.svc.cluster.local:9090`. There is no Ingress, NodePort, or LoadBalancer exposing it externally. The `/api/v1/write` endpoint is only reachable from within the cluster. `kubectl port-forward` creates a TCP tunnel from `localhost:9090` on the host to the Prometheus pod.
 
-> **Tip:** In local Docker Compose, Prometheus is exposed on `localhost:9090` — no tunnel needed. The issue only applies to K3s where Prometheus is a ClusterIP service.
+> **Tip:** In local Docker Compose, Prometheus is exposed on `localhost:9090` — no tunnel needed. This only applies to K3s where Prometheus is a ClusterIP service.
 
 For authenticated tests, get a token from the remote Keycloak and set `AUTH_TOKEN`:
 ```bash
