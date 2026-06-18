@@ -1,15 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET="${1:-}"
-DOMAIN="${2:-}"
-TAG="${3:-latest}"
-
-if [ -z "$TARGET" ] || [ -z "$DOMAIN" ]; then
-    echo "Uso: $0 <usuario@host> <dominio> [version]"
-    echo "Ejemplo: $0 janrax@janrax.es janrax.es 1.0.0"
-    echo "         $0 janrax@janrax.es janrax.es       (usa 'latest')"
+usage() {
+    echo "Usage: $0 -u <user@host> -d <domain> [-t <tag>]"
+    echo "Example: $0 -u janrax@janrax.es -d janrax.es"
+    echo "         $0 -u janrax@janrax.es -d janrax.es -t 1.0.0"
     exit 1
+}
+
+TAG="latest"
+while getopts "u:d:t:h" opt; do
+    case $opt in
+        u) TARGET="$OPTARG" ;;
+        d) DOMAIN="$OPTARG" ;;
+        t) TAG="$OPTARG" ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+
+if [ -z "${TARGET:-}" ] || [ -z "${DOMAIN:-}" ]; then
+    usage
 fi
 
 USER=$(echo "$TARGET" | cut -d'@' -f1)

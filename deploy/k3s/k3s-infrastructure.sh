@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET="${1:-}"
-DOMAIN="${2:-}"
-
-if [ -z "$TARGET" ] || [ -z "$DOMAIN" ]; then
-    echo "Uso: $0 <usuario@host> <dominio>"
-    echo "Ejemplo: $0 janrax@janrax.es janrax.es"
+usage() {
+    echo "Usage: $0 -u <user@host> -d <domain>"
+    echo "Example: $0 -u janrax@janrax.es -d janrax.es"
     exit 1
+}
+
+while getopts "u:d:h" opt; do
+    case $opt in
+        u) TARGET="$OPTARG" ;;
+        d) DOMAIN="$OPTARG" ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+
+if [ -z "${TARGET:-}" ] || [ -z "${DOMAIN:-}" ]; then
+    usage
 fi
 
 USER=$(echo "$TARGET" | cut -d'@' -f1)
@@ -97,7 +107,10 @@ kubectl patch secret mongodb-credentials -n infrastructure \
 gen_secret redis-credentials infrastructure redis-password=
 gen_secret keycloak-credentials infrastructure admin-password=
 gen_secret redpanda-console-credentials infrastructure admin-password=
-gen_secret grafana-credentials observability admin-password=
+gen_secret grafana-credentials observability admin-password= oauth-client-secret=grafana-client-secret
+# Patch oauth-client-secret for upgrades (gen_secret skips if secret already exists)
+kubectl patch secret grafana-credentials -n observability \
+    --patch='{"data":{"oauth-client-secret":"Z3JhZmFuYS1jbGllbnQtc2VjcmV0"}}' 2>/dev/null || true
 
 step \"Copiando Secrets a ticket-monster...\"
 copy_secret postgresql-credentials infrastructure ticket-monster
@@ -126,6 +139,52 @@ helm_install redpanda-console \"\$CHARTS/redpanda-console\" infrastructure \
 step \"Deploying Keycloak...\"
 helm_install keycloak \"\$CHARTS/keycloak\" infrastructure \
     --set domain=\"\$DOMAIN\"
+
+step \"Configurando cliente Grafana en Keycloak...\"
+# Kill any stale port-forward from previous runs
+fuser -k 18080/tcp 2>/dev/null || true
+sleep 1
+kubectl port-forward -n infrastructure svc/keycloak 18080:8080 &
+KC_PF=\$!
+sleep 5
+until curl -s http://localhost:18080/auth/realms/master >/dev/null 2>&1; do
+    echo \"  Esperando a que Keycloak esté listo...\"; sleep 5
+done
+
+KC_ADMIN=\$(kubectl get secret keycloak-credentials -n infrastructure -o jsonpath='{.data.admin-password}' | base64 -d)
+KC_TOKEN=\$(curl -s -X POST http://localhost:18080/auth/realms/master/protocol/openid-connect/token \
+    -d 'client_id=admin-cli' \
+    -d 'username=admin' \
+    -d \"password=\$KC_ADMIN\" \
+    -d 'grant_type=password' 2>/dev/null | jq -r '.access_token')
+
+KC_CLIENT_ID=\$(curl -s -H \"Authorization: Bearer \$KC_TOKEN\" \
+    http://localhost:18080/auth/admin/realms/ticket-monster/clients?clientId=grafana 2>/dev/null | jq -r '.[0].id // empty')
+if [ -n \"\$KC_CLIENT_ID\" ]; then
+    KC_CLIENT_JSON=\$(curl -s -H \"Authorization: Bearer \$KC_TOKEN\" \
+        http://localhost:18080/auth/admin/realms/ticket-monster/clients/\$KC_CLIENT_ID)
+    UPDATED_JSON=\$(echo \"\$KC_CLIENT_JSON\" | jq -c --arg uri \"https://\$DOMAIN/panel/login/generic_oauth\" '.redirectUris += [\$uri] | .redirectUris |= unique')
+    curl -s -X PUT \
+        -H \"Authorization: Bearer \$KC_TOKEN\" \
+        -H 'Content-Type: application/json' \
+        http://localhost:18080/auth/admin/realms/ticket-monster/clients/\$KC_CLIENT_ID \
+        -d \"\$UPDATED_JSON\" >/dev/null
+    ok \"Grafana client updated: https://\$DOMAIN/panel/login/generic_oauth\"
+else
+    HTTP_CODE=\$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+        -H \"Authorization: Bearer \$KC_TOKEN\" \
+        -H 'Content-Type: application/json' \
+        http://localhost:18080/auth/admin/realms/ticket-monster/clients \
+        -d "{\"clientId\":\"grafana\",\"publicClient\":false,\"standardFlowEnabled\":true,\"directAccessGrantsEnabled\":false,\"redirectUris\":[\"http://localhost:3000/login/generic_oauth\",\"https://$DOMAIN/panel/login/generic_oauth\"],\"webOrigins\":[\"+\"],\"secret\":\"grafana-client-secret\"}")
+    if [ \"\$HTTP_CODE\" = \"201\" ]; then
+        ok \"Grafana client created: https://\$DOMAIN/panel/login/generic_oauth\"
+    else
+        echo \"  \\033[1;31m✗ Failed to create Grafana client (HTTP \$HTTP_CODE)\\033[0m\"
+    fi
+fi
+
+kill \$KC_PF 2>/dev/null || true
+fuser -k 18080/tcp 2>/dev/null || true
 
 # ══════════════════════════════════════════════════════════
 # OBSERVABILITY
@@ -163,6 +222,10 @@ echo \"  URLs accesibles:\"
 echo \"    Keycloak:        https://\${DOMAIN}/auth\"
 echo \"    Grafana:         https://\${DOMAIN}/panel\"
 echo \"    Redpanda Console: https://redpanda.\${DOMAIN}\"
+echo \"\"
+echo \"  Grafana → Keycloak OAuth:\"
+echo \"    Login: https://\${DOMAIN}/panel > Sign in with Keycloak\"
+echo \"    Usuarios: admin/admin (Grafana Admin)  |  user/user (Grafana Editor)\"
 echo \"\"
 echo \"  Service endpoints:\"
 echo \"    PostgreSQL: postgresql.infrastructure.svc.cluster.local:5432\"

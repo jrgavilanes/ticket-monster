@@ -206,10 +206,15 @@ api_extract_body() {
 # === DECODIFICACIÓN JWT ===
 
 detect_role() {
-    local payload
+    local payload padded len mod
     payload=$(echo "$ACCESS_TOKEN" | cut -d'.' -f2)
+    padded=$(echo "$payload" | tr '_-' '/+')
+    len=${#padded}
+    mod=$((len % 4))
+    if [[ $mod -eq 2 ]]; then padded="${padded}=="; fi
+    if [[ $mod -eq 3 ]]; then padded="${padded}="; fi
     local decoded
-    decoded=$(echo "$payload" | base64 -d 2>/dev/null || echo "$payload" | base64 -d - 2>/dev/null)
+    decoded=$(echo "$padded" | base64 -d 2>/dev/null) || true
 
     if echo "$decoded" | jq -e '.realm_access.roles' >/dev/null 2>&1; then
         local roles

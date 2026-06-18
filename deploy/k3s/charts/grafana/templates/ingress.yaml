@@ -4,7 +4,7 @@ metadata:
   name: grafana
   namespace: {{ .Values.namespace }}
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/cluster-issuer: letsencrypt
     traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-redirect-to-https@kubernetescrd
 spec:
   ingressClassName: traefik

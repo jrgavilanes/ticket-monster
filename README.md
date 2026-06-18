@@ -407,16 +407,19 @@ k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
   --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
 ```
 
-Or run k6 directly on the VPS (no tunnel needed, writes to `localhost:9090`):
+Or run k6 directly on the VPS (same machine as the cluster). **You still need the port-forward** because Prometheus is a `ClusterIP` service and is not exposed on the host:
 
 ```bash
-# Quick test (100 VUs, 30s)
+# Terminal 1 (VPS) — keep this running in background
+kubectl port-forward -n observability svc/prometheus 9090:9090 &
+
+# Terminal 2 (VPS) — run the test
 K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
 K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
 k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
   --env BASE_URL=https://janrax.es deploy/tests/k6/catalog-read.js
 
-# Stress test (5000 VUs, 30s) — espera latencia alta y throughput estancado a ~2500 req/s
+# Stress test (5000 VUs, 30s)
 K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
 K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
 k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
@@ -424,9 +427,9 @@ k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
   --vus 5000 --duration 30s
 ```
 
-> **Note:** `localhost:9090` on the VPS works because a `kubectl port-forward` to Prometheus is already running. If the tunnel is down, recreate it: `kubectl port-forward -n observability prometheus-0 9090:9090 &`
+> **Why is this needed?** Prometheus runs inside K3s as a `ClusterIP` service at `prometheus.observability.svc.cluster.local:9090`. There is no Ingress, NodePort, or LoadBalancer exposing it externally. The `/api/v1/write` endpoint is only reachable from within the cluster. `kubectl port-forward` creates a TCP tunnel from `localhost:9090` on the host to the Prometheus pod.
 
-> **Tip:** In local Docker Compose, Prometheus is exposed on `localhost:9090` — no tunnel needed. The issue only applies to K3s where Prometheus is a ClusterIP service.
+> **Tip:** In local Docker Compose, Prometheus is exposed on `localhost:9090` — no tunnel needed. This only applies to K3s where Prometheus is a ClusterIP service.
 
 For authenticated tests, get a token from the remote Keycloak and set `AUTH_TOKEN`:
 ```bash
@@ -655,23 +658,175 @@ El test de 5K VUs contra K3s colapsó completamente: solo 2.994/5.000 VUs efecti
 > Para el sistema completo (reservations, payments, queue): **PgBouncer es crítico** para no saturar PostgreSQL con 60+ conexiones directas desde 3 pods.
 
 ```bash
-# 1. Provision K3s cluster
-./deploy/k3s/k3s-provision.sh janrax@janrax.es janrax.es
+# 1. Provision K3s cluster (production)
+./deploy/k3s/k3s-provision.sh -u janrax@janrax.es -d janrax.es
+
+# Or staging to avoid Let's Encrypt rate limits during testing:
+./deploy/k3s/k3s-provision.sh -u janrax@janrax.es -d janrax.es -s
 
 # 2. Deploy infrastructure + observability
-./deploy/k3s/k3s-infrastructure.sh janrax@janrax.es janrax.es
+./deploy/k3s/k3s-infrastructure.sh -u janrax@janrax.es -d janrax.es
 
 # 3. Deploy the monolith
-./deploy/k3s/k3s-publish-app.sh janrax@janrax.es janrax.es latest
+./deploy/k3s/k3s-publish-app.sh -u janrax@janrax.es -d janrax.es
+
+# Or with a specific version tag:
+./deploy/k3s/k3s-publish-app.sh -u janrax@janrax.es -d janrax.es -t 1.0.0
 
 # Or all at once:
 ./deploy/k3s/deploy.sh janrax@janrax.es janrax.es latest
 ```
 
+> **Let's Encrypt rate limits:** Testing with frequent redeploys can exhaust your certificate quota
+> (5 certs per domain per 7 days). Use the `-s` flag (staging) during development to avoid hitting
+> the limit. Staging certs are not trusted by browsers (show a warning), but Grafana's internal
+> token/userinfo calls go to `http://keycloak.infrastructure.svc.cluster.local:8080/auth` (no TLS),
+> so OAuth still works. When ready for production, re-provision without `-s`.
+
+#### Switching from staging to production (in-place, no data loss)
+
+If you provisioned with `-s` (staging) and want to switch to production certs without destroying
+the cluster:
+
+```bash
+# 1. Replace the ClusterIssuer with production server
+kubectl delete clusterissuer letsencrypt
+
+cat <<'YAML' | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@janrax.es
+    privateKeySecretRef:
+      name: letsencrypt-account-key
+    solvers:
+    - http01:
+        ingress:
+          ingressClassName: traefik
+YAML
+
+# 2. Delete staging certificates (they'll be reissued automatically)
+kubectl delete certificate --all -n infrastructure
+kubectl delete certificate --all -n observability
+
+# 3. Wait for production certs to be ready
+kubectl get certificates -A -w
+```
+
+All services and data (PostgreSQL, MongoDB, Redis) remain untouched. Once certificates show
+`Ready=True`, reload the browser and the TLS warning disappears.
+
 Images are built and pushed to GitHub Container Registry via the manual workflow:
 `.github/workflows/docker-publish.yml` → `ghcr.io/jrgavilanes/ticket-monster:<version>`.
 
+---
+
+## Grafana OAuth via Keycloak
+
+Grafana delegates authentication to Keycloak via OAuth2 Authorization Code flow.
+Users registered in the `ticket-monster` realm can log into Grafana at `https://<domain>/panel`.
+
+### Architecture
+
 ```
+Browser → https://<domain>/panel
+  → Grafana (observability ns)
+    → Keycloak OAuth2 (infrastructure ns, /auth)
+      → Keycloak realm ticket-monster
+        → users: admin/admin, user/user
+```
+
+### Role mapping
+
+| Keycloak realm role | Grafana role |
+|---------------------|-------------|
+| `ADMIN` | Admin (full access) |
+| `USER` | Editor (view + explore) |
+| none | Viewer (read-only) |
+
+### Fresh install (cluster from scratch)
+
+Fully automatic. `k3s-infrastructure.sh` does everything:
+
+1. **`realm-export.json`** includes the `grafana` confidential client (OAuth2, secret: `grafana-client-secret`)
+2. After deploying Keycloak, the script uses the **Keycloak Admin API** to add the domain-specific redirect URI (`https://<domain>/panel/login/generic_oauth`)
+3. After deploying Grafana, the OAuth env vars (`GF_AUTH_GENERIC_OAUTH_*`) are already configured in the Helm chart
+
+```bash
+# Run once — everything is wired automatically:
+./deploy/k3s/k3s-infrastructure.sh -u janrax@janrax.es -d janrax.es
+```
+
+Then open `https://<domain>/panel` → **Sign in with Keycloak** → `admin / admin`.
+
+### Existing installation (manual setup)
+
+If the cluster was deployed **before** this feature was added, the Keycloak realm already exists
+and the `grafana` client must be created manually via the Admin API:
+
+```bash
+# 1. Port-forward to Keycloak
+kubectl port-forward -n infrastructure svc/keycloak 18080:8080 &
+sleep 5
+
+# 2. Get admin token
+KC_ADMIN=$(kubectl get secret keycloak-credentials -n infrastructure \
+  -o jsonpath='{.data.admin-password}' | base64 -d)
+KC_TOKEN=$(curl -s -X POST \
+  http://localhost:18080/auth/realms/master/protocol/openid-connect/token \
+  -d 'client_id=admin-cli' \
+  -d 'username=admin' \
+  -d "password=$KC_ADMIN" \
+  -d 'grant_type=password' | jq -r '.access_token')
+
+# 3. Create the grafana client
+curl -s -X POST \
+  -H "Authorization: Bearer $KC_TOKEN" \
+  -H 'Content-Type: application/json' \
+  http://localhost:18080/auth/admin/realms/ticket-monster/clients \
+  -d '{
+    "clientId": "grafana",
+    "publicClient": false,
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": false,
+    "redirectUris": [
+      "http://localhost:3000/login/generic_oauth",
+      "https://<domain>/panel/login/generic_oauth"
+    ],
+    "webOrigins": ["+"],
+    "secret": "grafana-client-secret"
+  }'
+
+# 4. Store the client secret for Grafana
+kubectl patch secret grafana-credentials -n observability \
+  --patch '{"data":{"oauth-client-secret":"Z3JhZmFuYS1jbGllbnQtc2VjcmV0"}}'
+
+# 5. Kill port-forward
+kill %1
+
+# 6. Redeploy Grafana with OAuth settings
+kubectl delete pod -n observability -l app=grafana
+```
+
+> **Note:** Replace `<domain>` with your actual domain (e.g. `janrax.es`).
+> Re-running `k3s-infrastructure.sh` also works and redeploys Grafana automatically.
+
+### Docker Compose (local development)
+
+Works out of the box. The `grafana` client in `realm-export.json` already includes
+`http://localhost:3000/login/generic_oauth` as a redirect URI. Grafana in `docker-compose.yml`
+has all OAuth env vars configured pointing to `http://keycloak:8080`.
+
+```bash
+docker compose --profile app up -d
+# Open http://localhost:3000 → Sign in with Keycloak → admin / admin
+```
+
+---
 
 ## TODO / Improvements
 
