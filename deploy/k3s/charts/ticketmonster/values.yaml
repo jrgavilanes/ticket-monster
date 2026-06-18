@@ -14,10 +14,10 @@ ingress:
   className: traefik
   host: janrax.es
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/cluster-issuer: letsencrypt
     traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticket-monster-rate-limit@kubernetescrd,ticket-monster-ticket-monster-secure-headers@kubernetescrd
   graphqlAnnotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/cluster-issuer: letsencrypt
     traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticket-monster-secure-headers@kubernetescrd
   tls: true
 

@@ -32,6 +32,31 @@ spec:
               value: "true"
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
+            - name: GF_AUTH_GENERIC_OAUTH_ENABLED
+              value: {{ .Values.auth.oauthEnabled | quote }}
+            - name: GF_AUTH_GENERIC_OAUTH_AUTO_LOGIN
+              value: {{ .Values.auth.oauthAutoLogin | quote }}
+            - name: GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP
+              value: {{ .Values.auth.oauthAllowSignUp | quote }}
+            - name: GF_AUTH_GENERIC_OAUTH_NAME
+              value: Keycloak
+            - name: GF_AUTH_GENERIC_OAUTH_CLIENT_ID
+              value: grafana
+            - name: GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-credentials
+                  key: oauth-client-secret
+            - name: GF_AUTH_GENERIC_OAUTH_SCOPES
+              value: {{ .Values.auth.oauthScopes }}
+            - name: GF_AUTH_GENERIC_OAUTH_AUTH_URL
+              value: "https://{{ .Values.domain }}/auth/realms/{{ .Values.auth.keycloakRealm }}/protocol/openid-connect/auth"
+            - name: GF_AUTH_GENERIC_OAUTH_TOKEN_URL
+              value: "{{ .Values.auth.keycloakInternalUrl }}/realms/{{ .Values.auth.keycloakRealm }}/protocol/openid-connect/token"
+            - name: GF_AUTH_GENERIC_OAUTH_API_URL
+              value: "{{ .Values.auth.keycloakInternalUrl }}/realms/{{ .Values.auth.keycloakRealm }}/protocol/openid-connect/userinfo"
+            - name: GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH
+              value: {{ .Values.auth.oauthRoleAttributePath }}
           ports:
             - containerPort: {{ .Values.port }}
           readinessProbe:
