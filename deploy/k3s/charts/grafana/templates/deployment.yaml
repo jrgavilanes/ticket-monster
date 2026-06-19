@@ -57,6 +57,8 @@ spec:
               value: "{{ .Values.auth.keycloakInternalUrl }}/realms/{{ .Values.auth.keycloakRealm }}/protocol/openid-connect/userinfo"
             - name: GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH
               value: {{ .Values.auth.oauthRoleAttributePath }}
+            - name: GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_STRICT
+              value: {{ .Values.auth.oauthRoleAttributeStrict | quote }}
           ports:
             - containerPort: {{ .Values.port }}
           readinessProbe:
