@@ -20,7 +20,8 @@ auth:
   oauthAutoLogin: false
   oauthAllowSignUp: true
   oauthScopes: "openid email profile"
-  oauthRoleAttributePath: "contains(realm_access.roles[*], 'ADMIN') && 'Admin' || 'Editor'"
+  oauthRoleAttributePath: "contains(realm_access.roles[*], 'grafana-admin') && 'Admin' || contains(realm_access.roles[*], 'grafana-editor') && 'Editor' || contains(realm_access.roles[*], 'grafana-viewer') && 'Viewer' || 'Deny'"
+  oauthRoleAttributeStrict: true
   keycloakRealm: ticket-monster
   keycloakInternalUrl: "http://keycloak.infrastructure.svc.cluster.local:8080/auth"
 

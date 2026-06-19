@@ -515,10 +515,10 @@ http://localhost:8180/admin (admin / admin)
 
 ### Test users
 
-| User | Password | Roles |
-|------|----------|-------|
-| `admin` | `admin` | ADMIN, USER |
-| `user` | `user` | USER |
+| User | Password | Keycloak roles | Grafana role |
+|------|----------|---------------|-------------|
+| `admin` | `admin` | ADMIN, USER, grafana-admin | Admin |
+| `user` | `user` | USER, grafana-viewer | Viewer |
 
 ### Endpoints
 
@@ -677,6 +677,22 @@ El test de 5K VUs contra K3s colapsó completamente: solo 2.994/5.000 VUs efecti
 ./deploy/k3s/deploy.sh janrax@janrax.es janrax.es latest
 ```
 
+### Recreate infrastructure preserving TLS certs
+
+When you need to wipe and redeploy infrastructure (e.g., after Keycloak realm or Helm chart changes) but want to avoid new Let's Encrypt certificate requests:
+
+```bash
+./deploy/k3s/k3s-recreate.sh -u janrax@janrax.es -d janrax.es
+```
+
+This script runs 4 phases:
+1. **Backup** — saves TLS secrets (`<domain>-tls`) from `infrastructure` and `observability` namespaces
+2. **Destroy** — deletes `infrastructure`, `observability`, and `ticket-monster` namespaces
+3. **Re-provision** — runs `k3s-infrastructure.sh` (secrets, databases, Keycloak, Grafana stack)
+4. **Restore** — replaces freshly-issued TLS secrets with the backed-up ones and deletes cert-manager Certificate resources so they reconcile without re-issuing
+
+> This avoids hitting Let's Encrypt rate limits (5 duplicate certs per domain per 7 days). Useful when iterating on infrastructure configuration.
+
 > **Let's Encrypt rate limits:** Testing with frequent redeploys can exhaust your certificate quota
 > (5 certs per domain per 7 days). Use the `-s` flag (staging) during development to avoid hitting
 > the limit. Staging certs are not trusted by browsers (show a warning), but Grafana's internal
@@ -744,9 +760,14 @@ Browser → https://<domain>/panel
 
 | Keycloak realm role | Grafana role |
 |---------------------|-------------|
-| `ADMIN` | Admin (full access) |
-| `USER` | Editor (view + explore) |
-| none | Viewer (read-only) |
+| `grafana-admin` | Admin (full access) |
+| `grafana-editor` | Editor (view + explore) |
+| `grafana-viewer` | Viewer (read-only) |
+| none | Denied (login blocked) |
+
+Users without any `grafana-*` role are rejected at login. Role hierarchy: `grafana-admin` > `grafana-editor` > `grafana-viewer`. A user with multiple roles gets the highest one.
+
+The `role_attribute_strict: true` setting ensures that only users with an explicit `grafana-*` role can access Grafana. The `realm_access.roles` claim is exposed to the `/userinfo` endpoint via a protocol mapper on the `grafana` Keycloak client.
 
 ### Fresh install (cluster from scratch)
 

@@ -1,24 +1,12 @@
 ## ADDED Requirements
 
-### Requirement: Gateway routes requests by path
-The API Gateway SHALL route requests to the appropriate backend module based on the request path.
+### Requirement: Traefik ingress routes all requests to monolith
+All HTTP requests to the domain SHALL be routed by Traefik directly to the monolith service without intermediate routing between backend modules.
 
-#### Scenario: Catalog GraphQL route
-- **WHEN** a request is sent to `/graphql`
-- **THEN** the gateway SHALL forward the request to the Catalog module
+#### Scenario: GraphQL request to monolith
+- **WHEN** a request is sent to `https://janrax.es/graphql`
+- **THEN** Traefik SHALL forward the request directly to the ticketmonster service
 
-#### Scenario: Queue module route
-- **WHEN** a request is sent to `/api/v1/queue/{eventId}/join`
-- **THEN** the gateway SHALL forward the request to the Virtual Queue module
-
-#### Scenario: Reservation module route
-- **WHEN** a request is sent to `/api/v1/reservations`
-- **THEN** the gateway SHALL forward the request to the Reservation module
-
-#### Scenario: Payment module route
-- **WHEN** a request is sent to `/api/v1/payments`
-- **THEN** the gateway SHALL forward the request to the Payment module
-
-#### Scenario: Unknown path returns 404
-- **WHEN** a request is sent to an undefined path
-- **THEN** the gateway SHALL return a 404 Not Found response
+#### Scenario: Queue request to monolith
+- **WHEN** a request is sent to `https://janrax.es/api/v1/queue/{eventId}/join`
+- **THEN** Traefik SHALL forward the request directly to the ticketmonster service

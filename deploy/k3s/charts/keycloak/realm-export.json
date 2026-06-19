@@ -5,7 +5,10 @@
   "roles": {
     "realm": [
       { "name": "USER", "description": "Regular user" },
-      { "name": "ADMIN", "description": "Administrator" }
+      { "name": "ADMIN", "description": "Administrator" },
+      { "name": "grafana-viewer", "description": "Grafana read-only access" },
+      { "name": "grafana-editor", "description": "Grafana dashboard editing access" },
+      { "name": "grafana-admin", "description": "Grafana full administrative access" }
     ]
   },
   "users": [
@@ -18,7 +21,7 @@
       "credentials": [
         { "type": "password", "value": "admin", "temporary": false }
       ],
-      "realmRoles": ["USER", "ADMIN"]
+      "realmRoles": ["USER", "ADMIN", "grafana-admin"]
     },
     {
       "username": "user",
@@ -29,7 +32,7 @@
       "credentials": [
         { "type": "password", "value": "user", "temporary": false }
       ],
-      "realmRoles": ["USER"]
+      "realmRoles": ["USER", "grafana-viewer"]
     }
   ],
   "clients": [
