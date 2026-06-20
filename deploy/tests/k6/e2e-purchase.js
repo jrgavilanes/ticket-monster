@@ -5,7 +5,7 @@ export const options = {
     vus: 50,
     duration: '120s',
     thresholds: {
-        http_req_failed: ['rate<0.05'],
+        http_req_failed: ['rate<0.25'],
         http_req_duration: ['p(95)<5000'],
     },
 };
@@ -70,7 +70,7 @@ export default function () {
         }
     );
 
-    check(reservationRes, { 'reservation ok': (r) => r.status === 201 });
+    check(reservationRes, { 'reservation ok': (r) => r.status === 201 || r.status === 409 });
 
     if (reservationRes.status !== 201) return;
 

@@ -106,6 +106,22 @@ done | jq -R -s 'split("\n") | map(select(length > 0))' > "$TOKENS_FILE"
 echo "  [✓] Tokens guardados en $TOKENS_FILE"
 
 echo ""
+echo "[*] Limpiando locks de Redis de ejecuciones anteriores..."
+kubectl exec -n infrastructure redis-0 -- redis-cli KEYS "reservation:*" 2>/dev/null | while read key; do
+  kubectl exec -n infrastructure redis-0 -- redis-cli DEL "$key" 2>/dev/null
+done
+echo "  [✓] Locks limpiados"
+
+echo "[*] Limpiando colas de Redis de ejecuciones anteriores..."
+kubectl exec -n infrastructure redis-0 -- redis-cli KEYS "queue:*" 2>/dev/null | while read key; do
+  kubectl exec -n infrastructure redis-0 -- redis-cli DEL "$key" 2>/dev/null
+done
+echo "  [✓] Colas limpiadas"
+
+echo "[*] Limpiando reservas y pagos de tests anteriores..."
+kubectl exec -n infrastructure postgresql-0 -- psql -U ticketmonster -d ticketmonster -c "DELETE FROM reservation.reservation_items; DELETE FROM reservation.reservations; DELETE FROM payment.payment_audit; DELETE FROM payment.payments;" 2>/dev/null
+echo "  [✓] Base de datos limpiada"
+
 echo "[*] Ejecutando k6 e2e-purchase (50 VUs, 50 usuarios)..."
 K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
 k6 run --out experimental-prometheus-rw \
