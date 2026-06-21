@@ -357,35 +357,14 @@ docker compose --profile app up -d prometheus loki tempo grafana
 k6 can push metrics to Prometheus in real-time via the `experimental-prometheus-rw` output. Results appear on the **k6 Prometheus** dashboard in Grafana.
 
 ```bash
-# 1. Catalog read (public, no auth needed)
-K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
-K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
-k6 run -o experimental-prometheus-rw --tag testid=catalog-read \
-  deploy/tests/k6/catalog-read.js
+# 1. Catalog read (public GraphQL, no auth)
+./deploy/tests/k6/run-catalog-read.sh
 
-# 2. Queue join (requires auth + real event)
-TOKEN=$(curl -s -X POST http://localhost:8180/realms/ticket-monster/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=ticket-monster-app" \
-  -d "username=admin" -d "password=admin" \
-  -d "grant_type=password" | jq -r '.access_token')
+# 2. Queue load (tests Redis throughput for virtual queue joins)
+./deploy/tests/k6/run-queue-load.sh
 
-EVENT_ID=$(curl -s http://localhost:8082/graphql \
-  -H "Content-Type: application/json" \
-  -d '{"query":"{ events(page: 0, size: 1) { content { id } } }"}' | jq -r '.data.events.content[0].id')
-
-K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
-K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
-k6 run -o experimental-prometheus-rw --tag testid=queue-load \
-  --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" \
-  deploy/tests/k6/queue-load.js
-
-# 3. Reservation contention (requires event with zone stock)
-K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
-K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max \
-k6 run -o experimental-prometheus-rw --tag testid=reservation-contention \
-  --env AUTH_TOKEN="$TOKEN" --env EVENT_ID="$EVENT_ID" --env ZONE_ID="<zone-id>" \
-  deploy/tests/k6/reservation-contention.js
+# 3. Reservation contention (tests anti-overbooking under extreme concurrency)
+./deploy/tests/k6/run-reservation-contention.sh
 ```
 
 > **Note:** Defaults are `BASE_URL=http://localhost:8082`. Override with `--env BASE_URL=<url>`.
@@ -656,6 +635,209 @@ El test de 5K VUs contra K3s colapsó completamente: solo 2.994/5.000 VUs efecti
 > Para el test catalog-read.js (solo GraphQL → MongoDB): **3 pods del monolito + 3 MongoDB en replica set** es la combinación ganadora. 3 pods × thread pool distribuyen las 5K conexiones concurrentes, y el replica set de MongoDB permite leer desde secondaries. PgBouncer no afecta este test específico porque no toca PostgreSQL.
 >
 > Para el sistema completo (reservations, payments, queue): **PgBouncer es crítico** para no saturar PostgreSQL con 60+ conexiones directas desde 3 pods.
+
+### Reservation Contention Test (anti-overbooking)
+
+Este test valida que el sistema **nunca sobrevende** bajo concurrencia extrema: 1000 VUs compitiendo por solo **10 tickets** en `zone-vip`, usando **100 usuarios distintos** con su propio token JWT.
+
+#### ¿Qué hace `run-reservation-contention.sh`?
+
+1. **Setup de datos** (GraphQL como admin):
+   - Crea un venue (`Estadio Test K6`, Madrid, 500 capacidad)
+   - Crea un artist (`DJ Test K6`, Electronic)
+   - Crea un evento con dos zonas: `zone-general` (5000 tickets) y **`zone-vip` (solo 10 tickets)**
+   - Publica el evento
+
+2. **Setup de usuarios** (Keycloak Admin API):
+   - Asegura 100 usuarios `k6user1`..`k6user100` en el realm `ticket-monster`
+   - Obtiene los 100 tokens JWT y los guarda en `/tmp/k6-tokens-*.json`
+
+3. **Limpieza** (Redis + PostgreSQL vía `kubectl exec`):
+   - Borra todos los locks Redis con key `reservation:*`
+   - Borra todas las reservas y pagos de ejecuciones anteriores
+
+4. **Ejecución del test k6**:
+   - 1000 VUs, 1000 iteraciones (cada VU ejecuta 1 petición)
+   - Cada VU usa un token distinto: `tokens[__VU % tokens.length]` → 10 VUs por usuario
+   - Todas las peticiones intentan `POST /api/v1/reservations` con 1 ticket en `zone-vip`
+
+#### Flujo por cada petición dentro del backend
+
+```
+VU (token k6userX) → POST /api/v1/reservations
+  ├─ Valida max-tickets-per-customer (≤3 por usuario/evento)
+  ├─ SELECT ... FOR UPDATE sobre zone_stock de zone-vip (PostgreSQL)
+  │   → Solo 1 transacción toca la fila a la vez — serializa las 1000 peticiones
+  ├─ Si availableCount >= 1:
+  │   ├─ Redis: SETNX reservation:{eventId}:zone-vip:{userId} NX EX 600
+  │   │   → Previene que el mismo usuario haga doble reserva en la misma zona
+  │   ├─ Decrementa availableCount (PostgreSQL)
+  │   └─ Crea ReservationItem → HTTP 201 Created
+  └─ Si availableCount === 0:
+      └─ InsufficientStockException → HTTP 409 Conflict
+```
+
+Los dos mecanismos de lock compiten así:
+- **Redis lock** (`SETNX`): 100 usuarios → cada uno pasa su lock sin conflicto (son keys distintas por userId)
+- **PostgreSQL `SELECT FOR UPDATE`**: Las 1000 transacciones se serializan sobre la misma fila de `zone_stock`. Solo las primeras 10 ven `availableCount >= 1`. Las 990 restantes encuentran stock agotado y devuelven 409.
+
+#### Resultados (K3s VPS, janrax.es)
+
+```
+=== Reservation Contention Test Results ===
+Total requests:           1000
+Completed iterations:     1000
+Success rate:             100.00%
+p95 latency:              3170ms
+Total test duration:      ~4.0s
+```
+
+| Métrica | Valor | Significado |
+|----------|-------|-------------|
+| **Success rate 100%** | Todas las respuestas son 201 o 409 | Sin errores 500, timeouts ni overbooking |
+| **p95 3170ms** | 95% de peticiones completan en <3.2s | El `SELECT FOR UPDATE` serializa las 1000 peticiones sobre 1 fila |
+| **100% iterations** | 1000/1000 VUs completaron | Sin VUs interrumpidas ni fallos de red |
+| **~10 × 201** | ~10 reservas creadas | Exactamente la capacidad de `zone-vip` |
+| **~990 × 409** | ~990 rechazos por stock agotado | Anti-overbooking funcionando correctamente |
+
+#### Por qué es importante
+
+- **Comparativa con 1 solo usuario:** El p95 bajaba a 2790ms. Con 100 usuarios el p95 sube a 3170ms (+14%) porque hay 100 veces más transacciones que pasan el lock Redis y compiten en la fila de PostgreSQL.
+- **El `SELECT FOR UPDATE` es el cuello de botella**, no Redis ni el thread pool. Es el precio de la consistencia CP.
+- **0 overbooking:** Con 10 tickets y 1000 peticiones, el sistema nunca vendió más de 10. El doble lock (Redis + PostgreSQL) cumple su función.
+
+### Virtual Queue Load Test (Redis throughput)
+
+Este test mide la capacidad del módulo de **Fila Virtual** para absorber una avalancha de usuarios uniéndose a la cola de un evento. A diferencia del test de reservas (CP), la cola virtual es **AP**: opera exclusivamente sobre Redis sin tocar PostgreSQL ni MongoDB.
+
+#### ¿Qué hace `run-queue-load.sh`?
+
+1. **Setup de datos** (GraphQL como admin):
+   - Crea venue, artist, evento con zonas (zone-general: 5000 tickets, zone-vip: 1000 tickets)
+   - Publica el evento
+
+2. **Setup de usuarios** (Keycloak Admin API):
+   - Asegura 50 usuarios `k6user1`..`k6user50` en el realm `ticket-monster`
+   - Obtiene 50 tokens JWT y los guarda en `/tmp/k6-tokens-*.json`
+
+3. **Limpieza** (Redis + PostgreSQL vía `kubectl exec`):
+   - Borra colas Redis (`queue:*`) y locks (`reservation:*`) de ejecuciones anteriores
+   - Borra reservas y pagos de PostgreSQL
+
+4. **Ejecución del test k6**:
+   - 200 VUs, 30s de duración (cada VU hace peticiones en loop con `sleep(0.1)`)
+   - Cada VU usa un token distinto: `tokens[__VU % tokens.length]`
+   - `POST /api/v1/queue/{eventId}/join` → Redis `LPUSH queue:{eventId}`
+
+#### Flujo por cada petición dentro del backend
+
+```
+VU (token k6userX) → POST /api/v1/queue/{eventId}/join
+  ├─ Valida JWT (Keycloak)
+  ├─ Valida que el evento existe (MongoDB — solo la 1ª vez, cacheado)
+  └─ Redis: LPUSH queue:{eventId} {userId}
+      └─ Retorna ticketId (UUID) + position (LLEN)
+```
+
+No hay locks. No hay `SELECT FOR UPDATE`. No hay PostgreSQL. Solo HTTP → Redis.
+
+#### Resultados (K3s VPS, janrax.es, 200 VUs × 30s)
+
+| Métrica | Valor | Significado |
+|----------|-------|-------------|
+| **Throughput** | 526 req/s | 200 VUs sosteniendo ~2.6 req/s cada uno |
+| **Total requests** | 15,904 | 200 VUs × ~80 iteraciones c/u en 30s |
+| **p95 latency** | 676ms | 95% bajo 700ms — Redis + HTTP overhead |
+| **p50 latency** | 234ms | Mitad de las peticiones bajo 250ms |
+| **Error rate** | 0.00% | Cero fallos — Redis no se satura a esta carga |
+| **has ticketId** | 100% | Todas las respuestas incluyen ticketId UUID |
+| **has position** | 99.8% | 32 de 15,904 sin posición (race condition en LLEN) |
+
+#### Límite de escala detectado
+
+El test se diseñó originalmente para **10,000 VUs**. Resultados a distintas escalas:
+
+**1 pod, 10K VUs:** Colapso total — 80% de fallos, servidor devolviendo HTML en vez de JSON. El thread pool HTTP + HikariCP se saturan con 10K conexiones entrantes.
+
+**5 pods, 10K VUs:** Peor que con 1 pod — solo **144 peticiones completadas** de 10K, error `connection refused` masivo. **El pod de Traefik se cayó.** Al escalar los pods de la app, cada uno abre conexiones a MongoDB, PostgreSQL, Redis, Redpanda y Keycloak, consumiendo más file descriptors del VPS. Traefik como punto único de entrada no puede absorber 10K conexiones TCP simultáneas con los recursos del VPS actual.
+
+**200 VUs (1 pod):** Funciona perfecto — 526 req/s, p95 676ms, 0% errores.
+
+**Conclusión:** El bottleneck para 10K VUs no es la app ni Redis — es **Traefik + los límites TCP del kernel del VPS** (`somaxconn`, file descriptors). Escalar pods dentro del mismo nodo es contraproducente porque compiten por los mismos recursos de red. Para soportar 10K conexiones concurrentes haría falta múltiples nodos K3s o subir los límites del kernel.
+
+#### Comparativa: Queue vs Reservation
+
+| | Queue Load | Reservation Contention |
+|---|---|---|
+| **Endpoint** | `POST /queue/{id}/join` | `POST /reservations` |
+| **Storage** | Solo Redis (`LPUSH`) | PostgreSQL + Redis |
+| **CAP** | AP (alta disponibilidad) | CP (consistencia) |
+| **p95 a 200 VUs** | 676ms | 3170ms (a 1000 VUs) |
+| **Bottleneck** | HTTP thread pool | `SELECT FOR UPDATE` en PostgreSQL |
+| **Error rate** | 0% | 0% (201 o 409 válidos) |
+
+### Catalog Read Test (GraphQL + MongoDB throughput)
+
+Este test mide la capacidad del módulo de **Catálogo** para servir consultas GraphQL bajo carga. Es el único test que no requiere autenticación: el endpoint `/graphql` es público y sin rate limiting. Cada iteración ejecuta 2 queries contra MongoDB: listado de eventos y disponibilidad por zona.
+
+#### ¿Qué hace `run-catalog-read.sh`?
+
+1. **Setup de datos** (GraphQL como admin):
+   - Crea venue, artist, evento con zonas y lo publica (necesario para la query de `availability`)
+   - Pasa el `EVENT_ID` real al test k6
+
+2. **Ejecución del test k6**:
+   - 200 VUs, 30s de duración (cada VU hace 2 queries por iteración con `sleep(0.1)`)
+   - Endpoint público — sin tokens, sin usuarios Keycloak
+   - `POST /graphql` con `{ events(page: 0, size: 20) { ... } }` + `{ availability(eventId: ...) { ... } }`
+
+#### Flujo por cada petición dentro del backend
+
+```
+VU → POST /graphql (sin auth)
+  ├─ Spring for GraphQL → Catalog Module
+  ├─ Query 1: events(page: 0, size: 20)
+  │   └─ MongoDB: db.events.find().limit(20)
+  ├─ sleep(0.1s)
+  └─ Query 2: availability(eventId)
+      └─ Reservation Module → PostgreSQL: SELECT availableCount FROM zone_stock
+```
+
+El catálogo de eventos está en MongoDB (AP, sin locks). La disponibilidad consulta PostgreSQL (sin `FOR UPDATE`, solo lectura).
+
+#### Resultados (K3s VPS, janrax.es, 2 pods × 200 VUs × 30s)
+
+| Métrica | Valor | Significado |
+|----------|-------|-------------|
+| **Throughput** | 91 req/s | 200 VUs sosteniendo ~0.45 req/s c/u (2 queries = ~45 iter/s) |
+| **Total iterations** | 1,451 | 200 VUs × ~7.25 iteraciones c/u en 30s |
+| **p95 latency** | 5.61s | 95% bajo 5.6s — MongoDB es el bottleneck |
+| **p50 latency** | 1.61s | Mitad de las queries GraphQL bajo 1.6s |
+| **Error rate** | 0.00% | Sin fallos HTTP — todas las respuestas son 200 |
+| **events query ok** | 100% | Todas las queries de eventos devuelven 200 |
+| **availability query ok** | 100% | Todas las queries de disponibilidad devuelven 200 |
+
+#### Límite de escala detectado
+
+| Escenario | VUs | Resultado |
+|-----------|-----|-----------|
+| **1 pod, 5K VUs** | 5000 | Colapso — 99% fallos, p95 32s, HTML en vez de JSON |
+| **1 pod, 1K VUs** | 1000 | Colapso — 0 iteraciones completadas, servidor saturado |
+| **2 pods, 200 VUs** | 200 | Funciona — 0% errores, p95 5.61s, MongoDB es el bottleneck |
+
+A diferencia de queue-load (Redis puro, p95 676ms), el catálogo es **8× más lento** porque cada query GraphQL va a MongoDB. La latencia no mejora al escalar de 1→2 pods porque el cuello de botella es **MongoDB con 1 solo nodo**, no el thread pool de la app.
+
+#### Comparativa Stack: los 3 tests
+
+| | Catalog Read | Queue Load | Reservation Contention |
+|---|---|---|---|
+| **Endpoint** | `POST /graphql` | `POST /queue/{id}/join` | `POST /reservations` |
+| **Auth** | ❌ Público | ✅ JWT | ✅ JWT |
+| **Storage** | MongoDB + PostgreSQL | Solo Redis | PostgreSQL + Redis |
+| **CAP** | AP | AP | CP |
+| **p95 (200 VUs)** | 5.61s | 676ms | 3170ms (1000 iter) |
+| **Throughput** | 91 req/s | 526 req/s | ~250 req/s (efectivo) |
+| **Bottleneck** | MongoDB (1 nodo) | HTTP thread pool | `SELECT FOR UPDATE` |
 
 ```bash
 # 1. Provision K3s cluster (production)

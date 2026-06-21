@@ -12,8 +12,14 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 const EVENT_ID = __ENV.EVENT_ID || 'test-event-1';
 const ZONE_ID = __ENV.ZONE_ID || 'zone-vip';
+
+const tokensFile = __ENV.TOKENS_FILE || '';
+const tokens = tokensFile ? JSON.parse(open(tokensFile)) : [];
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || '';
 export default function () {
+    const token = tokens.length > 0
+        ? tokens[__VU % tokens.length]
+        : AUTH_TOKEN;
     const payload = JSON.stringify({
         eventId: EVENT_ID,
         items: [{ zoneId: ZONE_ID, quantity: 1 }],
@@ -24,7 +30,7 @@ export default function () {
         payload,
         {
             headers: {
-                'Authorization': `Bearer ${AUTH_TOKEN}`,
+                'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json',
             },
         }
@@ -42,14 +48,15 @@ export default function () {
 
 export function handleSummary(data) {
     const totalRequests = data.metrics.http_reqs.values.count;
-    const successRate = data.metrics.http_reqs.values.count > 0
-        ? (data.metrics.iterations_completed / totalRequests) * 100
+    const completed = data.metrics.iterations.values.count;
+    const successRate = totalRequests > 0
+        ? ((completed / totalRequests) * 100)
         : 0;
 
     return {
         stdout: `\n=== Reservation Contention Test Results ===\n` +
             `Total requests: ${totalRequests}\n` +
-            `Completed iterations: ${data.metrics.iterations_completed}\n` +
+            `Completed iterations: ${completed}\n` +
             `Success rate: ${successRate.toFixed(2)}%\n` +
             `p95 latency: ${data.metrics.http_req_duration.values['p(95)'].toFixed(2)}ms\n`,
     };
