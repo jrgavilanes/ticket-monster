@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "frontend-slides": {
+      "source": "zarazhangrui/frontend-slides",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "7da7864a4502a5b8de85b0ab6c211051018a3631002a40a1bb34c924442e25d9"
+    },
     "grill-me": {
       "source": "mattpocock/skills",
       "sourceType": "github",
