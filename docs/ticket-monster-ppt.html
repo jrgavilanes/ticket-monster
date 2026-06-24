@@ -1,0 +1,1709 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ticket Monster — Documento de Arquitectura de Software</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ===========================================
+   CSS CUSTOM PROPERTIES — Blueprint Theme
+   =========================================== */
+:root {
+    --bg-deep: #0b1120;
+    --bg-surface: #111b2e;
+    --cyan: #22d3ee;
+    --cyan-dim: rgba(34, 211, 238, 0.15);
+    --cyan-glow: rgba(34, 211, 238, 0.25);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245, 158, 11, 0.12);
+    --amber-glow: rgba(245, 158, 11, 0.2);
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-dim: #64748b;
+    --grid-major: rgba(34, 211, 238, 0.05);
+    --grid-minor: rgba(34, 211, 238, 0.025);
+    --font-display: 'Schibsted Grotesk', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --dur: 0.6s;
+    --stage-bg: #0b1120;
+    --slide-bg: #0b1120;
+}
+
+/* ===========================================
+   FIXED 16:9 STAGE: MANDATORY BASE STYLES
+   =========================================== */
+html, body {
+    width: 100%; height: 100%;
+    margin: 0; overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+.deck-viewport {
+    position: fixed; inset: 0;
+    overflow: hidden; background: var(--stage-bg, #000);
+}
+.deck-stage {
+    position: absolute; left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    overflow: hidden; transform-origin: 0 0;
+    background: var(--slide-bg, #fff);
+}
+.slide {
+    position: absolute; inset: 0;
+    width: 1920px; height: 1080px;
+    overflow: hidden; display: block;
+    visibility: hidden; opacity: 0;
+    pointer-events: none;
+    background: var(--slide-bg, #fff);
+}
+.slide.active, .slide.visible {
+    visibility: visible; opacity: 1;
+    pointer-events: auto; z-index: 1;
+}
+img, video, canvas, svg {
+    max-width: 100%; max-height: 100%;
+}
+.deck-controls {
+    position: fixed; left: 50%; bottom: 22px;
+    transform: translateX(-50%); z-index: 1000;
+}
+@media print {
+    html, body { width: 1920px; height: auto; overflow: visible; background: #fff; }
+    .deck-viewport { position: static; overflow: visible; background: #fff; }
+    .deck-stage { position: static; width: auto; height: auto; transform: none !important; background: none; }
+    .slide { position: relative; display: block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; width: 1920px; height: 1080px; break-after: page; }
+    .slide:last-child { break-after: auto; }
+    .deck-controls { display: none !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.2s !important; }
+}
+
+/* ===========================================
+   SHARED SLIDE CHROME
+   =========================================== */
+.slide {
+    background:
+        linear-gradient(var(--grid-major) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+        linear-gradient(var(--grid-minor) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px);
+    background-size: 160px 160px, 160px 160px, 32px 32px, 32px 32px;
+}
+
+/* Top accent gradient bar */
+.slide-topbar {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--cyan), var(--amber));
+}
+
+/* Corner accents */
+.slide-tl, .slide-br {
+    position: absolute;
+    width: 20px; height: 20px;
+    opacity: 0.4;
+}
+.slide-tl { top: 36px; left: 48px; border-left: 2px solid var(--cyan); border-top: 2px solid var(--cyan); }
+.slide-br { bottom: 36px; right: 48px; border-right: 2px solid var(--cyan); border-bottom: 2px solid var(--cyan); }
+
+/* Page number */
+.slide-num {
+    position: absolute; bottom: 32px; right: 56px;
+    font-family: var(--font-mono); font-size: 13px;
+    color: var(--text-dim); font-weight: 300;
+}
+
+/* Section title area */
+.slide-header {
+    position: absolute; top: 60px; left: 100px; right: 100px;
+    display: flex; align-items: baseline; gap: 20px;
+}
+.slide-section-tag {
+    font-family: var(--font-mono); font-size: 13px;
+    color: var(--cyan); letter-spacing: 2px;
+    text-transform: uppercase; white-space: nowrap;
+}
+.slide-section-title {
+    font-family: var(--font-display); font-weight: 700;
+    font-size: 44px; color: var(--text-primary);
+    letter-spacing: -0.5px; line-height: 1.15;
+}
+.header-rule {
+    position: absolute; top: 136px; left: 100px; right: 100px;
+    height: 1px; background: var(--cyan-dim);
+}
+
+/* Content area */
+.slide-body {
+    position: absolute; top: 170px; left: 100px; right: 100px; bottom: 80px;
+}
+
+/* ===========================================
+   REVEAL ANIMATIONS
+   =========================================== */
+.reveal {
+    opacity: 0; transform: translateY(22px);
+    transition: opacity var(--dur) var(--ease-out),
+                transform var(--dur) var(--ease-out);
+}
+.slide.visible .reveal { opacity: 1; transform: translateY(0); }
+.reveal:nth-child(1) { transition-delay: 0.05s; }
+.reveal:nth-child(2) { transition-delay: 0.12s; }
+.reveal:nth-child(3) { transition-delay: 0.19s; }
+.reveal:nth-child(4) { transition-delay: 0.26s; }
+.reveal:nth-child(5) { transition-delay: 0.33s; }
+.reveal:nth-child(6) { transition-delay: 0.40s; }
+.reveal:nth-child(7) { transition-delay: 0.47s; }
+.reveal:nth-child(8) { transition-delay: 0.54s; }
+.reveal:nth-child(9) { transition-delay: 0.61s; }
+.reveal:nth-child(10) { transition-delay: 0.68s; }
+.reveal-delay-1 { transition-delay: 0.15s !important; }
+.reveal-delay-2 { transition-delay: 0.30s !important; }
+.reveal-delay-3 { transition-delay: 0.45s !important; }
+
+/* ===========================================
+   TITLE SLIDE
+   =========================================== */
+.title-slide .title-content {
+    position: absolute; top: 200px; left: 140px; right: 140px;
+}
+.title-slide .sys-label {
+    font-family: var(--font-mono); font-size: 14px;
+    color: var(--cyan); letter-spacing: 3px;
+    text-transform: uppercase; margin-bottom: 44px;
+}
+.title-slide .sys-label::before {
+    content: '◆ '; color: var(--amber); font-size: 10px; vertical-align: middle;
+}
+.title-slide .title-main {
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 124px; line-height: 0.93; color: var(--text-primary);
+    letter-spacing: -3px; margin-bottom: 32px;
+}
+.title-slide .title-accent { color: var(--cyan); }
+.title-slide .title-sub {
+    font-family: var(--font-display); font-weight: 400;
+    font-size: 26px; color: var(--text-secondary);
+    line-height: 1.5; max-width: 880px;
+    border-left: 3px solid var(--amber); padding-left: 28px;
+    margin-bottom: 60px;
+}
+.title-slide .title-meta {
+    display: flex; gap: 40px; align-items: center;
+    font-family: var(--font-mono); font-size: 14px; color: var(--text-dim);
+}
+.title-slide .meta-dot {
+    width: 6px; height: 6px; background: var(--amber);
+    border-radius: 50%; flex-shrink: 0;
+}
+.title-slide .data-badge {
+    position: absolute; top: 260px; right: 140px;
+    font-family: var(--font-mono); font-size: 13px;
+    color: var(--cyan); opacity: 0.5;
+    text-align: right; line-height: 1.9;
+}
+.title-slide .ring-deco {
+    position: absolute; right: 160px; bottom: 300px;
+    width: 130px; height: 130px;
+    border: 2px solid var(--cyan-dim);
+    border-radius: 50%; opacity: 0.25;
+}
+.title-slide .ring-deco::after {
+    content: ''; position: absolute;
+    top: 18px; left: 18px; right: 18px; bottom: 18px;
+    border: 1px solid var(--amber-dim);
+    border-radius: 50%;
+}
+
+/* ===========================================
+   AGENDA SLIDE
+   =========================================== */
+.agenda-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    gap: 12px;
+    height: 100%;
+}
+.agenda-item {
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 24px;
+    border: 1px solid rgba(34, 211, 238, 0.1);
+    font-family: var(--font-display); font-weight: 500;
+    font-size: 20px; color: var(--text-secondary);
+    transition: border-color 0.3s;
+}
+.agenda-num {
+    font-family: var(--font-mono); font-size: 18px;
+    color: var(--cyan); font-weight: 500;
+    min-width: 32px; text-align: right;
+}
+.agenda-item.highlight {
+    border-color: var(--amber-dim);
+    color: var(--text-primary);
+}
+.agenda-item.highlight .agenda-num { color: var(--amber); }
+
+/* ===========================================
+   GENERIC LAYOUT HELPERS
+   =========================================== */
+.two-col {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 40px; height: 100%;
+}
+.two-col-wide {
+    display: grid; grid-template-columns: 1.1fr 0.9fr;
+    gap: 48px; height: 100%;
+}
+.three-col {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 30px; height: 100%;
+}
+
+/* Metric cards */
+.metric-row {
+    display: flex; gap: 32px;
+}
+.metric-card {
+    flex: 1; border: 1px solid rgba(34, 211, 238, 0.12);
+    padding: 28px 32px;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.metric-value {
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 60px; color: var(--cyan); line-height: 1;
+}
+.metric-label {
+    font-family: var(--font-display); font-size: 16px;
+    color: var(--text-secondary); font-weight: 500;
+}
+.metric-detail {
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--text-dim);
+}
+
+/* Info cards */
+.info-card {
+    border: 1px solid rgba(34, 211, 238, 0.1);
+    padding: 24px 28px;
+}
+.info-card h4 {
+    font-family: var(--font-display); font-weight: 600;
+    font-size: 20px; color: var(--cyan); margin-bottom: 12px;
+}
+.info-card p, .info-card li {
+    font-family: var(--font-display); font-size: 16px;
+    color: var(--text-secondary); line-height: 1.6;
+}
+.info-card ul { list-style: none; padding: 0; }
+.info-card li::before { content: '▸ '; color: var(--amber); font-size: 12px; }
+.info-card li + li { margin-top: 6px; }
+
+/* Spec tables */
+.spec-table {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--font-display); font-size: 16px;
+}
+.spec-table thead th {
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--cyan); text-transform: uppercase;
+    letter-spacing: 1px; font-weight: 500;
+    text-align: left; padding: 10px 16px;
+    border-bottom: 1px solid var(--cyan-dim);
+}
+.spec-table tbody td {
+    padding: 10px 16px; color: var(--text-secondary);
+    border-bottom: 1px solid rgba(34, 211, 238, 0.06);
+    line-height: 1.5;
+}
+.spec-table tbody tr:last-child td { border-bottom: none; }
+.spec-table .td-key {
+    font-family: var(--font-mono); font-size: 13px;
+    color: var(--cyan); font-weight: 500;
+}
+.spec-table .td-val { color: var(--text-primary); font-weight: 500; }
+
+/* Flow step cards */
+.flow-row {
+    display: flex; gap: 16px; height: 100%; align-items: stretch;
+}
+.flow-step {
+    flex: 1; border: 1px solid rgba(34, 211, 238, 0.1);
+    padding: 22px 20px;
+    display: flex; flex-direction: column;
+}
+.flow-step-num {
+    font-family: var(--font-mono); font-size: 32px;
+    color: var(--cyan); font-weight: 300; line-height: 1;
+    margin-bottom: 10px;
+}
+.flow-step h4 {
+    font-family: var(--font-display); font-weight: 600;
+    font-size: 17px; color: var(--text-primary);
+    margin-bottom: 8px; line-height: 1.3;
+}
+.flow-step p {
+    font-family: var(--font-display); font-size: 14px;
+    color: var(--text-secondary); line-height: 1.5;
+    flex: 1;
+}
+.flow-step .step-endpoint {
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--cyan); margin-top: 10px;
+    opacity: 0.7;
+}
+
+/* CAP table */
+.cap-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 16px; height: 100%;
+}
+.cap-card {
+    border: 1px solid rgba(34, 211, 238, 0.1);
+    padding: 20px; display: flex; flex-direction: column;
+}
+.cap-card h5 {
+    font-family: var(--font-mono); font-size: 13px;
+    color: var(--cyan); margin-bottom: 8px;
+    letter-spacing: 1px; text-transform: uppercase;
+}
+.cap-card .cap-choice {
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 48px; color: var(--text-primary);
+    margin-bottom: 6px; line-height: 1;
+}
+.cap-choice.cp { color: var(--cyan); }
+.cap-choice.ap { color: var(--amber); }
+.cap-card p {
+    font-family: var(--font-display); font-size: 13px;
+    color: var(--text-secondary); line-height: 1.5;
+}
+
+/* Boxed highlight */
+.box-highlight {
+    border: 1px solid var(--amber-dim);
+    padding: 20px 28px; margin-top: 20px;
+}
+.box-highlight p {
+    font-family: var(--font-display); font-size: 17px;
+    color: var(--text-primary); font-weight: 500;
+    line-height: 1.5;
+}
+.box-highlight .mono-inline {
+    font-family: var(--font-mono); font-size: 14px;
+    color: var(--cyan);
+}
+
+/* Tech stack table */
+.tech-table {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--font-display); font-size: 15px;
+}
+.tech-table th {
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--cyan); text-transform: uppercase;
+    letter-spacing: 1px; font-weight: 500;
+    text-align: left; padding: 8px 12px;
+    border-bottom: 1px solid var(--cyan-dim);
+}
+.tech-table td {
+    padding: 7px 12px; color: var(--text-secondary);
+    border-bottom: 1px solid rgba(34, 211, 238, 0.05);
+    line-height: 1.4; vertical-align: top;
+}
+.tech-table .cat-row td {
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--amber); font-weight: 500;
+    padding-top: 14px; border-bottom: 1px solid var(--amber-dim);
+}
+
+/* Closing slide */
+.closing-slide .closing-content {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%); text-align: center;
+}
+.closing-slide .closing-title {
+    font-family: var(--font-display); font-weight: 800;
+    font-size: 100px; color: var(--text-primary);
+    letter-spacing: -2px; margin-bottom: 20px;
+}
+.closing-slide .closing-sub {
+    font-family: var(--font-display); font-size: 24px;
+    color: var(--text-secondary);
+    margin-bottom: 50px;
+}
+.closing-slide .closing-meta {
+    font-family: var(--font-mono); font-size: 14px;
+    color: var(--text-dim);
+}
+
+/* Layer defense card */
+.layer-card {
+    border-left: 3px solid var(--cyan-dim);
+    padding: 16px 20px; margin-bottom: 14px;
+}
+.layer-card.layer-1 { border-left-color: var(--cyan); }
+.layer-card.layer-2 { border-left-color: var(--cyan); opacity: 0.9; }
+.layer-card.layer-3 { border-left-color: var(--amber); }
+.layer-card h5 {
+    font-family: var(--font-display); font-weight: 600;
+    font-size: 18px; color: var(--text-primary);
+    margin-bottom: 4px;
+}
+.layer-card p {
+    font-family: var(--font-display); font-size: 15px;
+    color: var(--text-secondary); line-height: 1.5;
+}
+.layer-card .layer-tech {
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--cyan); opacity: 0.7;
+    margin-top: 4px;
+}
+
+/* Inline mono accent */
+.mono-accent { font-family: var(--font-mono); font-size: 0.9em; color: var(--cyan); font-weight: 500; }
+.amber-accent { color: var(--amber); font-weight: 600; }
+
+/* ===========================================
+   INLINE EDITING
+   =========================================== */
+.edit-hotzone {
+    position: fixed; top: 0; left: 0;
+    width: 80px; height: 80px;
+    z-index: 10000; cursor: pointer;
+}
+.edit-toggle {
+    position: fixed; top: 8px; left: 8px;
+    z-index: 10001; opacity: 0; pointer-events: none;
+    transition: opacity 0.3s ease;
+    background: rgba(11,17,32,0.9); border: 1px solid var(--cyan-dim);
+    color: var(--cyan); font-size: 18px; width: 40px; height: 40px;
+    border-radius: 4px; cursor: pointer; display: flex;
+    align-items: center; justify-content: center;
+}
+.edit-toggle.show, .edit-toggle.active { opacity: 1; pointer-events: auto; }
+[contenteditable="true"] { outline: 2px dashed var(--cyan); outline-offset: 4px; cursor: text; }
+[contenteditable="true"]:focus { outline-color: var(--amber); }
+
+/* ===========================================
+   PROGRESS / NAV INDICATOR
+   =========================================== */
+.nav-indicator {
+    position: fixed; bottom: 28px; left: 50%;
+    transform: translateX(-50%); z-index: 1000;
+    display: flex; gap: 6px; align-items: center;
+    font-family: var(--font-mono); font-size: 13px;
+    color: var(--text-dim);
+    background: rgba(11,17,32,0.85);
+    padding: 6px 16px; border-radius: 4px;
+    border: 1px solid rgba(34,211,238,0.1);
+}
+</style>
+</head>
+<body>
+<div class="edit-hotzone"></div>
+<button class="edit-toggle" id="editToggle" title="Edit mode (E)">&#9998;</button>
+
+<div class="deck-viewport">
+<main class="deck-stage" id="deckStage">
+
+<!-- ==============================
+     SLIDE 01: TITULO
+     ============================== -->
+<section class="slide title-slide active">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="title-content">
+        <p class="sys-label reveal">Sistema de Alta Concurrencia · SAD v1.0</p>
+        <h1 class="title-main reveal"><span class="title-accent">Ticket</span> Monster</h1>
+        <p class="title-sub reveal">Documento de Arquitectura de Software — Arquitecturas Backend a Gran Escala con Java</p>
+        <div class="title-meta reveal">
+            <span class="meta-dot"></span><span>Juan Ramón Gavilanes Sánchez</span>
+            <span class="meta-dot"></span><span>Julio 2026</span>
+            <span class="meta-dot"></span><span>Versión 1.0</span>
+        </div>
+    </div>
+    <div class="data-badge reveal">
+        50M DAU &nbsp;|&nbsp; 5M CCU<br>
+        0 Overbooking &nbsp;|&nbsp; CP+AP Hybrid
+    </div>
+    <div class="ring-deco"></div>
+    <span class="slide-num">01</span>
+</section>
+
+<!-- ==============================
+     SLIDE 02: AGENDA
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Índice</span>
+        <h2 class="slide-section-title">Contenido del Documento</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="agenda-grid">
+            <div class="agenda-item highlight"><span class="agenda-num">01</span> Introducción y contexto de negocio</div>
+            <div class="agenda-item"><span class="agenda-num">02</span> Drivers de arquitectura (RF + NFR)</div>
+            <div class="agenda-item"><span class="agenda-num">03</span> Visión general — Modelo C4</div>
+            <div class="agenda-item"><span class="agenda-num">04</span> Descomposición DDD + Context Map</div>
+            <div class="agenda-item"><span class="agenda-num">05</span> API Specification (GraphQL + REST)</div>
+            <div class="agenda-item"><span class="agenda-num">06</span> Modelo de datos (persistencia políglota)</div>
+            <div class="agenda-item"><span class="agenda-num">07</span> Mecanismo anti-overbooking</div>
+            <div class="agenda-item"><span class="agenda-num">08</span> Estrategia de Fila Virtual</div>
+            <div class="agenda-item"><span class="agenda-num">09</span> Comunicación asíncrona + Seguridad</div>
+            <div class="agenda-item"><span class="agenda-num">10</span> Resiliencia, CAP, Observabilidad, Despliegue, Evolución</div>
+        </div>
+    </div>
+    <span class="slide-num">02</span>
+</section>
+
+<!-- ==============================
+     SLIDE 03: INTRODUCCION
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 1</span>
+        <h2 class="slide-section-title">Introducción y contexto de negocio</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:20px;">
+                <p style="font-family:var(--font-display);font-size:20px;color:var(--text-primary);line-height:1.5;font-weight:500;">
+                    Sistema en línea de venta de tickets para eventos de gran escala, diseñado para soportar picos extremos de demanda durante aperturas de venta masivas.
+                </p>
+                <p style="font-family:var(--font-display);font-size:17px;color:var(--text-secondary);line-height:1.6;">
+                    Gestiona múltiples <span class="amber-accent">venues</span>, tipos de evento (conciertos, deportes, teatro, festivales, conferencias), fechas y artistas. Los usuarios consultan el catálogo, se unen a una fila virtual, reservan entradas por zona con TTL de 10 minutos y confirman el pago.
+                </p>
+                <div class="box-highlight">
+                    <p>Flujo intencionadamente separado en <span class="amber-accent">6 etapas explícitas</span> — cada una escala y falla de forma independiente. La fila virtual absorbe la avalancha inicial sin tocar la base de datos de reservas.</p>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:20px;">
+                <div class="metric-row">
+                    <div class="metric-card"><span class="metric-value">50M</span><span class="metric-label">DAU</span><span class="metric-detail">Usuarios diarios activos</span></div>
+                    <div class="metric-card"><span class="metric-value">5M</span><span class="metric-label">CCU</span><span class="metric-detail">Concurrentes en apertura</span></div>
+                </div>
+                <div class="metric-card" style="border-color:var(--amber-dim);">
+                    <span class="metric-value" style="color:var(--amber);">0</span>
+                    <span class="metric-label">Overbooking</span>
+                    <span class="metric-detail">Bajo cualquier condición de concurrencia</span>
+                </div>
+                <div style="border:1px solid rgba(34,211,238,0.1);padding:20px 24px;">
+                    <p style="font-family:var(--font-mono);font-size:12px;color:var(--cyan);margin-bottom:8px;">FLUJO DE COMPRA</p>
+                    <p style="font-family:var(--font-display);font-size:16px;color:var(--text-secondary);line-height:1.6;">
+                        <span class="mono-accent">1.</span> Unirse a cola virtual →
+                        <span class="mono-accent">2.</span> Esperar turno →
+                        <span class="mono-accent">3.</span> Obtener token →
+                        <span class="mono-accent">4.</span> Reservar entradas →
+                        <span class="mono-accent">5.</span> Iniciar pago →
+                        <span class="mono-accent">6.</span> Confirmar pago
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">03</span>
+</section>
+
+<!-- ==============================
+     SLIDE 04: DRIVERS DE ARQUITECTURA
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 2</span>
+        <h2 class="slide-section-title">Drivers de arquitectura</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div>
+                <h4 style="font-family:var(--font-mono);font-size:12px;color:var(--cyan);margin-bottom:12px;letter-spacing:1px;">REQUISITOS FUNCIONALES</h4>
+                <table class="spec-table">
+                    <thead><tr><th>ID</th><th>Requisito</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">RF-01</td><td>Ver eventos — listado paginado con venue, artistas y zonas</td></tr>
+                        <tr><td class="td-key">RF-02</td><td>Buscar eventos — por texto, tipo, fecha y venue</td></tr>
+                        <tr><td class="td-key">RF-03</td><td>Fila Virtual — unirse a cola FIFO, consultar posición, obtener token</td></tr>
+                        <tr><td class="td-key">RF-04</td><td>Reservar tickets — por zona con TTL 10 min, máx 3 tickets/usuario</td></tr>
+                        <tr><td class="td-key">RF-05</td><td>Comprar tickets — iniciar y confirmar pago con idempotencia</td></tr>
+                        <tr><td class="td-key">RF-06</td><td>Administrar catálogo — CRUD de eventos, venues y artistas (ADMIN)</td></tr>
+                        <tr><td class="td-key">RF-07</td><td>Consultar disponibilidad — tiempo real por zona</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div>
+                <h4 style="font-family:var(--font-mono);font-size:12px;color:var(--amber);margin-bottom:12px;letter-spacing:1px;">REQUISITOS NO FUNCIONALES</h4>
+                <table class="spec-table">
+                    <thead><tr><th>ID</th><th>Categoría</th><th>Objetivo</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">NFR-01</td><td>Consistencia</td><td class="td-val">Cero overbooking</td></tr>
+                        <tr><td class="td-key">NFR-02</td><td>Escalabilidad</td><td class="td-val">50M DAU</td></tr>
+                        <tr><td class="td-key">NFR-03</td><td>Escalabilidad</td><td class="td-val">5M usuarios concurrentes</td></tr>
+                        <tr><td class="td-key">NFR-04</td><td>Rendimiento</td><td>Lecturas catálogo p95 &lt; 200ms</td></tr>
+                        <tr><td class="td-key">NFR-05</td><td>Rendimiento</td><td>Flujo compra p95 &lt; 5s</td></tr>
+                        <tr><td class="td-key">NFR-06</td><td>Disponibilidad</td><td>Tasa de fallos &lt; 1%</td></tr>
+                        <tr><td class="td-key">NFR-07</td><td>Seguridad</td><td>OAuth2/OIDC con roles</td></tr>
+                        <tr><td class="td-key">NFR-08</td><td>Observabilidad</td><td>Métricas + logs + trazas</td></tr>
+                        <tr><td class="td-key">NFR-09</td><td>Resiliencia</td><td>Circuit breakers + rate limiting</td></tr>
+                        <tr><td class="td-key">NFR-10</td><td>Evolución</td><td>Preparación para µservicios</td></tr>
+                    </tbody>
+                </table>
+                <div class="box-highlight" style="margin-top:12px;">
+                    <p style="font-size:14px;">NFR-04, 05, 06 derivados de pruebas k6. Resto del documento de requisitos del bootcamp.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">04</span>
+</section>
+
+<!-- ==============================
+     SLIDE 05: VISION GENERAL C4
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 3</span>
+        <h2 class="slide-section-title">Visión general — Modelo C4</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col-wide">
+            <div style="display:flex;flex-direction:column;gap:18px;">
+                <p style="font-family:var(--font-display);font-size:19px;color:var(--text-primary);font-weight:500;line-height:1.5;">
+                    <span class="amber-accent">Monolito modular event-driven</span> con Spring Modulith. Cada módulo mapea a un bounded context DDD.
+                </p>
+                <div class="info-card">
+                    <h4>Nivel 1 — Contexto</h4>
+                    <p>Usuario → Traefik (TLS + Rate Limit) + Keycloak (OAuth2) → Ticket Monster. Sistema autocontenido sin dependencias cloud externas.</p>
+                </div>
+                <div class="info-card">
+                    <h4>Nivel 2 — Contenedores</h4>
+                    <p>4 módulos en el monolito: <span class="mono-accent">Catalog</span> (GraphQL + MongoDB), <span class="mono-accent">Virtual Queue</span> (REST + Redis), <span class="mono-accent">Reservation</span> (REST + PostgreSQL + Redis), <span class="mono-accent">Payment</span> (REST + PostgreSQL). Mensajería vía Redpanda. Observabilidad con Loki + Prometheus + Tempo + Grafana.</p>
+                </div>
+                <div class="info-card">
+                    <h4>Nivel 3 — Componentes</h4>
+                    <p>Cada módulo expone sus controladores, servicios, repositorios y publishers. Comunicación híbrida: síncrona para queries (interfaces Java) y asíncrona para eventos de dominio (Redpanda).</p>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:18px;">
+                <table class="spec-table">
+                    <thead><tr><th>Nivel C4</th><th>Nombre</th><th>Pregunta</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">1</td><td>Contexto</td><td>¿Qué sistema es y cómo se relaciona?</td></tr>
+                        <tr><td class="td-key">2</td><td>Contenedores</td><td>¿Qué piezas lo componen?</td></tr>
+                        <tr><td class="td-key">3</td><td>Componentes</td><td>¿Cómo se organiza cada contenedor?</td></tr>
+                        <tr><td class="td-key">4</td><td>Código</td><td>Diagramas de clases/paquetes</td></tr>
+                    </tbody>
+                </table>
+                <div style="border:1px solid rgba(34,211,238,0.1);padding:20px;">
+                    <p style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);margin-bottom:8px;">DECISIÓN CLAVE</p>
+                    <p style="font-family:var(--font-display);font-size:15px;color:var(--text-secondary);line-height:1.5;">
+                        Bases de datos <span class="amber-accent">aisladas por bounded context</span>: schemas PostgreSQL separados (<span class="mono-accent">reservation</span>, <span class="mono-accent">payment</span>) y prefijos Redis diferenciados (<span class="mono-accent">queue:</span>, <span class="mono-accent">reservation:</span>) — preparan extracción futura a microservicios sin migración de datos.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">05</span>
+</section>
+
+<!-- ==============================
+     SLIDE 06: DESCOMPOSICION DDD
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 4</span>
+        <h2 class="slide-section-title">Descomposición DDD + Context Map</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col" style="gap:24px;">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div class="info-card"><h4>Catalog <span style="color:var(--amber);font-size:14px;">AP · Supporting</span></h4><p>Catálogo de eventos, venues y artistas. MongoDB (documental, schema flexible). GraphQL público. Única dependencia síncrona: consulta <span class="mono-accent">availability</span> a Reservation.</p></div>
+                <div class="info-card"><h4>Virtual Queue <span style="color:var(--amber);font-size:14px;">AP · Core</span></h4><p>Cola FIFO en Redis. Absorbe avalancha sin tocar PostgreSQL. Batch dispatcher limita entrada a 250 usuarios/s. Token HMAC como llave de acceso sin dependencia de Keycloak.</p></div>
+                <div class="info-card"><h4>Reservation <span style="color:var(--cyan);font-size:14px;">CP · Core</span></h4><p>Núcleo transaccional. Doble lock (Redis SETNX + PostgreSQL SELECT FOR UPDATE). Guardián del cero overbooking. Publica eventos en Redpanda.</p></div>
+                <div class="info-card"><h4>Payment <span style="color:var(--cyan);font-size:14px;">CP · Supporting</span></h4><p>Simulación con idempotencia y auditoría completa. <span class="mono-accent">payment-confirmed</span> en Redpanda convierte reserva a SOLD.</p></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);letter-spacing:1px;">CONTEXT MAP — RELACIONES DDD</p>
+                <table class="spec-table">
+                    <thead><tr><th>Origen → Destino</th><th>Tipo</th><th>Mecanismo</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">Catalog → Reservation</td><td>Customer-Supplier</td><td>Síncrono: <span class="mono-accent">AvailabilityService</span></td></tr>
+                        <tr><td class="td-key">Catalog → Reservation</td><td>Customer-Supplier</td><td>Asíncrono: Spring Event</td></tr>
+                        <tr><td class="td-key">Queue → Reservation</td><td>Partnership</td><td>Token HMAC vía cliente</td></tr>
+                        <tr><td class="td-key">Reservation → Payment</td><td>Customer-Supplier</td><td>Redpanda: <span class="mono-accent">reservation-created</span></td></tr>
+                        <tr><td class="td-key">Payment → Reservation</td><td>Customer-Supplier</td><td>Redpanda: <span class="mono-accent">payment-confirmed</span></td></tr>
+                    </tbody>
+                </table>
+                <div class="box-highlight">
+                    <p style="font-size:15px;"><span class="amber-accent">Única llamada síncrona entre módulos:</span> Catalog → Reservation para <span class="mono-accent">availability</span>. Al extraer Catalog a microservicio, se migra a gRPC con contrato <span class="mono-accent">.proto</span> sin cambiar lógica de GraphQL.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">06</span>
+</section>
+
+<!-- ==============================
+     SLIDE 07: API SPECIFICATION
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 5</span>
+        <h2 class="slide-section-title">API Specification</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);letter-spacing:1px;">GRAPHQL — CATÁLOGO <span style="color:var(--text-dim);">/graphql</span></p>
+                <table class="spec-table">
+                    <thead><tr><th>Tipo</th><th>Operación</th><th>Auth</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">Query</td><td>events(page, size)</td><td>Pública</td></tr>
+                        <tr><td class="td-key">Query</td><td>event(id)</td><td>Pública</td></tr>
+                        <tr><td class="td-key">Query</td><td>searchEvents(query, filters)</td><td>Pública</td></tr>
+                        <tr><td class="td-key">Query</td><td>availability(eventId)</td><td>Pública</td></tr>
+                        <tr><td class="td-key">Mutation</td><td>createEvent / updateEvent</td><td>ADMIN</td></tr>
+                        <tr><td class="td-key">Mutation</td><td>deleteEvent</td><td>ADMIN</td></tr>
+                        <tr><td class="td-key">Mutation</td><td>createVenue / createArtist</td><td>ADMIN</td></tr>
+                    </tbody>
+                </table>
+                <p style="font-family:var(--font-display);font-size:14px;color:var(--text-dim);">Schema SDL completo con tipos Event, Venue, Artist, Zone, ZoneAvailability y enums EventType, EventStatus.</p>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-mono);font-size:11px;color:var(--amber);letter-spacing:1px;">REST — MÓDULOS TRANSACCIONALES <span style="color:var(--text-dim);">/api/v1/*</span></p>
+                <table class="spec-table">
+                    <thead><tr><th>Módulo</th><th>Endpoints</th><th>Auth</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">Queue</td><td>POST /join · GET /status · GET /token</td><td>JWT</td></tr>
+                        <tr><td class="td-key">Reservation</td><td>POST / · GET /{id} · DELETE /{id}</td><td>JWT</td></tr>
+                        <tr><td class="td-key">Payment</td><td>POST / · GET /{id} · POST /{id}/confirm</td><td>JWT</td></tr>
+                    </tbody>
+                </table>
+                <div class="info-card">
+                    <h4>Detalles clave</h4>
+                    <ul>
+                        <li><span class="mono-accent">POST /join</span> idempotente: mismo usuario → mismo ticketId</li>
+                        <li>Token HMAC con TTL 5 min, firmado localmente sin Keycloak</li>
+                        <li>Reserva: límite 3 tickets/usuario, TTL 10 min, DELETE restaura stock</li>
+                        <li>Pago: idempotente por <span class="mono-accent">reservationId</span> y <span class="mono-accent">idempotencyKey</span></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">07</span>
+</section>
+
+<!-- ==============================
+     SLIDE 08: MODELO DE DATOS
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 6</span>
+        <h2 class="slide-section-title">Modelo de datos — Persistencia políglota</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="three-col" style="gap:28px;">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);padding:4px 10px;border:1px solid var(--cyan-dim);">MongoDB 7</span>
+                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--amber);">Catálogo</span>
+                </div>
+                <p style="font-family:var(--font-display);font-size:15px;color:var(--text-secondary);line-height:1.5;">
+                    Schema flexible para eventos heterogéneos. <span class="amber-accent">Zonas embebidas</span> en Event (evita JOINs). Venue y Artist como colecciones independientes referenciadas. Full-text search nativo.
+                </p>
+                <table class="spec-table">
+                    <thead><tr><th>Colección</th><th>Documento</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">events</td><td>name, type, date, venueId, artistIds[], zones[], status</td></tr>
+                        <tr><td class="td-key">venues</td><td>name, location{}, totalCapacity</td></tr>
+                        <tr><td class="td-key">artists</td><td>name, genre, bio, imageUrl</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);padding:4px 10px;border:1px solid var(--cyan-dim);">PostgreSQL 16</span>
+                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--amber);">Reservas + Pagos</span>
+                </div>
+                <p style="font-family:var(--font-display);font-size:15px;color:var(--text-secondary);line-height:1.5;">
+                    ACID para transacciones. <span class="amber-accent">SELECT FOR UPDATE</span> serializa acceso. Schemas separados: <span class="mono-accent">reservation</span> y <span class="mono-accent">payment</span>.
+                </p>
+                <table class="spec-table">
+                    <thead><tr><th>Tabla</th><th>Schema</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">zone_stock</td><td>event_id, zone_id, total_capacity, available_count</td></tr>
+                        <tr><td class="td-key">reservations</td><td>id, user_id, event_id, status, expires_at</td></tr>
+                        <tr><td class="td-key">reservation_items</td><td>reservation_id, zone_id, quantity</td></tr>
+                        <tr><td class="td-key">payments</td><td>idempotency_key UNIQUE, amount, status</td></tr>
+                        <tr><td class="td-key">payment_audit</td><td>Append-only, previous_status → new_status</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);padding:4px 10px;border:1px solid var(--cyan-dim);">Redis 7</span>
+                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--amber);">Colas + Locks</span>
+                </div>
+                <p style="font-family:var(--font-display);font-size:15px;color:var(--text-secondary);line-height:1.5;">
+                    Operaciones atómicas en microsegundos. LIST para colas FIFO, SET para idempotencia, SETNX con TTL para locks.
+                </p>
+                <table class="spec-table">
+                    <thead><tr><th>Key Pattern</th><th>Tipo</th><th>TTL</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">queue:{eventId}</td><td>LIST</td><td>—</td></tr>
+                        <tr><td class="td-key">queue:members:{eventId}</td><td>SET</td><td>—</td></tr>
+                        <tr><td class="td-key">queue:turn:{eventId}</td><td>HASH</td><td>—</td></tr>
+                        <tr><td class="td-key">reservation:{eId}:{zId}:{uId}</td><td>STRING</td><td>600s</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">08</span>
+</section>
+
+<!-- ==============================
+     SLIDE 09: ANTI-OVERBOOKING
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 7</span>
+        <h2 class="slide-section-title">Mecanismo anti-overbooking</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <p style="font-family:var(--font-display);font-size:19px;color:var(--text-primary);font-weight:500;margin-bottom:20px;">
+            Tres capas de defensa superpuestas que garantizan <span class="amber-accent">cero overbooking</span> incluso con 1000+ peticiones simultáneas compitiendo por las mismas entradas.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;">
+            <div class="layer-card layer-1">
+                <h5>Capa 1 — Límite de tickets por usuario</h5>
+                <p>Verifica que el usuario no exceda el máximo configurable (3 tickets por evento). Protección anti-abuso que reduce contención en capas siguientes.</p>
+                <span class="layer-tech">SELECT COUNT(*) WHERE user_id = ? AND status = 'ACTIVE'</span>
+            </div>
+            <div class="layer-card layer-2">
+                <h5>Capa 2 — SELECT FOR UPDATE (PostgreSQL)</h5>
+                <p>Bloqueo pesimista a nivel de fila serializa todas las peticiones concurrentes. 1000 peticiones → ejecución secuencial sobre <span class="mono-accent">zone_stock</span>. La undécima encuentra available_count = 0 → ROLLBACK → 409.</p>
+                <span class="layer-tech">BEGIN → SELECT FOR UPDATE → UPDATE available_count → INSERT → COMMIT</span>
+            </div>
+            <div class="layer-card layer-3">
+                <h5>Capa 3 — Lock distribuido (Redis SETNX)</h5>
+                <p>Cierra la brecha del mismo usuario con peticiones concurrentes. Key <span class="mono-accent">reservation:{eventId}:{zoneId}:{userId}</span> con TTL 10 min. Solo una petición adquiere el lock.</p>
+                <span class="layer-tech">SETNX reservation:{eId}:{zId}:{uId} EX 600</span>
+            </div>
+        </div>
+        <div class="box-highlight">
+            <p><span class="amber-accent">Verificación empírica (k6):</span> 1000 peticiones concurrentes, 100 usuarios, 10 tickets en zone-vip → <span class="mono-accent">exactamente 10 reservas creadas (201)</span>, 990 rechazos (409), 0 errores, 0 overbooking.</p>
+        </div>
+    </div>
+    <span class="slide-num">09</span>
+</section>
+
+<!-- ==============================
+     SLIDE 10: FILA VIRTUAL
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 8</span>
+        <h2 class="slide-section-title">Estrategia de Fila Virtual</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-display);font-size:19px;color:var(--text-primary);font-weight:500;line-height:1.5;">
+                    Respuesta arquitectónica al problema de <span class="amber-accent">5M de usuarios concurrentes</span> en apertura de venta.
+                </p>
+                <div class="flow-row" style="flex-wrap:wrap;gap:10px;">
+                    <div class="flow-step" style="min-width:140px;">
+                        <span class="flow-step-num">1</span>
+                        <h4>LPUSH</h4>
+                        <p>Usuario se encola en Redis FIFO. O(1), microsegundos. Idempotente vía SET auxiliar.</p>
+                        <span class="step-endpoint">POST /join</span>
+                    </div>
+                    <div class="flow-step" style="min-width:140px;">
+                        <span class="flow-step-num">2</span>
+                        <h4>Polling</h4>
+                        <p>Cliente consulta posición periódicamente. LRANGE + HEXISTS.</p>
+                        <span class="step-endpoint">GET /status</span>
+                    </div>
+                    <div class="flow-step" style="min-width:140px;">
+                        <span class="flow-step-num">3</span>
+                        <h4>Batch Dispatcher</h4>
+                        <p>@Scheduled cada 2s extrae 500 usuarios (RPOP). Limita tasa a 250/s.</p>
+                        <span class="step-endpoint">HSET TURN_READY</span>
+                    </div>
+                    <div class="flow-step" style="min-width:140px;">
+                        <span class="flow-step-num">4</span>
+                        <h4>Token HMAC</h4>
+                        <p>Firma HMAC-SHA256. TTL 5 min. Sin dependencia de Keycloak.</p>
+                        <span class="step-endpoint">GET /token</span>
+                    </div>
+                    <div class="flow-step" style="min-width:140px;">
+                        <span class="flow-step-num">5</span>
+                        <h4>Reserva</h4>
+                        <p>Usuario presenta token al Reservation Module por HTTP.</p>
+                        <span class="step-endpoint">POST /reservations</span>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <table class="spec-table">
+                    <thead><tr><th>Aspecto</th><th>Redis</th><th>Kafka/Redpanda</th></tr></thead>
+                    <tbody>
+                        <tr><td>Latencia</td><td class="td-val">&lt; 1ms</td><td>~5-10ms</td></tr>
+                        <tr><td>Throughput</td><td class="td-val">~100K ops/s</td><td>~1M msg/s (+ overhead)</td></tr>
+                        <tr><td>Modelo datos</td><td class="td-val">LIST nativa FIFO</td><td>Log inmutable</td></tr>
+                        <tr><td>Posición usuario</td><td class="td-val">LLEN O(1)</td><td>Requiere contador externo</td></tr>
+                        <tr><td>Complejidad</td><td class="td-val">Mínima</td><td>Consumidores, offsets</td></tr>
+                    </tbody>
+                </table>
+                <div class="box-highlight">
+                    <p style="font-size:15px;"><span class="amber-accent">Trade-off aceptado:</span> si Redis se cae, la cola se vacía. Usuarios reintentan. Es AP deliberado — se prioriza rendimiento sobre durabilidad. Para eventos de dominio críticos se usa Redpanda (CP).</p>
+                </div>
+                <p style="font-family:var(--font-display);font-size:14px;color:var(--text-dim);line-height:1.6;">
+                    <span class="amber-accent">Resultado k6:</span> 526 req/s, p95 676ms, 0% errores con 200 VUs concurrentes sobre K3s remoto (1 pod).
+                </p>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">10</span>
+</section>
+
+<!-- ==============================
+     SLIDE 11: COMUNICACION ASINCRONA
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 9</span>
+        <h2 class="slide-section-title">Comunicación asíncrona — Redpanda</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-display);font-size:17px;color:var(--text-primary);font-weight:500;line-height:1.5;">
+                    Redpanda (Kafka-compatible, Raft consensus) elegido sobre Apache Kafka por menor huella operacional y latencias más bajas en despliegues pequeños.
+                </p>
+                <table class="spec-table">
+                    <thead><tr><th>Tópico</th><th>Productor</th><th>Consumidor</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">reservation-created</td><td>Reservation</td><td>Payment (+ Notificaciones futuro)</td></tr>
+                        <tr><td class="td-key">reservation-cancelled</td><td>Reservation</td><td>Payment (reembolso futuro)</td></tr>
+                        <tr><td class="td-key">reservation-expired</td><td>Reservation</td><td>Payment (reembolso futuro)</td></tr>
+                        <tr><td class="td-key">payment-confirmed</td><td>Payment</td><td>Reservation (→ SOLD)</td></tr>
+                        <tr><td class="td-key">payment-refund-required</td><td>Reservation</td><td>Payment (futuro)</td></tr>
+                    </tbody>
+                </table>
+                <div class="info-card">
+                    <h4>Garantías de entrega</h4>
+                    <ul>
+                        <li><span class="mono-accent">acks=all</span> — confirmación de todas las réplicas</li>
+                        <li><span class="mono-accent">enable.idempotence=true</span> — exactly-once por partición</li>
+                        <li>Consumidores con commit manual — at-least-once</li>
+                    </ul>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-mono);font-size:12px;color:var(--cyan);letter-spacing:1px;">FLUJO DE EVENTOS — COMPRA EXITOSA</p>
+                <div style="border:1px solid rgba(34,211,238,0.1);padding:24px;">
+                    <p style="font-family:var(--font-mono);font-size:14px;color:var(--text-secondary);line-height:2;">
+                        <span style="color:var(--cyan);">1.</span> Reservation → <span class="mono-accent">reservation-created</span> → Redpanda<br>
+                        <span style="color:var(--cyan);">2.</span> Redpanda → <span class="mono-accent">reservation-created</span> → Payment<br>
+                        <span style="color:var(--cyan);">3.</span> Payment → <span class="mono-accent">payment-confirmed</span> → Redpanda<br>
+                        <span style="color:var(--cyan);">4.</span> Redpanda → <span class="mono-accent">payment-confirmed</span> → Reservation<br>
+                        <span style="color:var(--amber);margin-left:20px;">↳ Convierte reserva a SOLD</span>
+                    </p>
+                </div>
+                <div class="box-highlight">
+                    <p style="font-size:14px;"><span class="amber-accent">Justificación:</span> desacoplamiento temporal (Reservation no espera a Payment), resiliencia (eventos se acumulan si el consumidor está caído), y preparación para extracción a microservicios sin cambiar el protocolo de comunicación.</p>
+                </div>
+                <p style="font-family:var(--font-display);font-size:14px;color:var(--text-dim);line-height:1.5;">
+                    <span class="amber-accent">Evolución síncrona → gRPC:</span> la única llamada síncrona actual (Catalog → Reservation para availability) se migrará a gRPC con contrato <span class="mono-accent">.proto</span> al extraer Catalog. Eventos internos Spring → tópico Redpanda <span class="mono-accent">zones-modified</span>.
+                </p>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">11</span>
+</section>
+
+<!-- ==============================
+     SLIDE 12: SEGURIDAD
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 10</span>
+        <h2 class="slide-section-title">Seguridad — Defensa en 4 capas</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="three-col" style="gap:26px;">
+            <div class="info-card">
+                <h4>Capa 1 — Edge (Traefik)</h4>
+                <ul>
+                    <li>TLS termination (Let's Encrypt)</li>
+                    <li>Rate limiting: 10K req/s en /api/*</li>
+                    <li>Secure headers (HSTS, XSS, etc.)</li>
+                    <li>2 Ingress separados: GraphQL público + API con rate limit</li>
+                </ul>
+                <p style="font-family:var(--font-display);font-size:13px;color:var(--text-dim);margin-top:10px;">Decisión: eliminar API Gateway Spring Cloud → Traefik asume sus responsabilidades. Pruebas k6 mostraron que el gateway añadía ~50-100ms y era punto único de fallo.</p>
+            </div>
+            <div class="info-card">
+                <h4>Capa 2 — Auth (Keycloak)</h4>
+                <ul>
+                    <li>Realm ticket-monster</li>
+                    <li>OAuth2/OIDC con JWT RS256</li>
+                    <li>Roles: USER, ADMIN</li>
+                    <li>Clientes: app + Grafana</li>
+                </ul>
+                <p style="font-family:var(--font-display);font-size:13px;color:var(--text-dim);margin-top:10px;">Monolito actúa como OAuth2 Resource Server validando JWT contra Keycloak.</p>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                <div class="info-card">
+                    <h4>Capa 3 — Autorización (Spring)</h4>
+                    <ul>
+                        <li>GraphQL queries: públicas</li>
+                        <li>GraphQL mutations: ADMIN</li>
+                        <li>REST /api/v1/*: JWT válido</li>
+                        <li>Autoría de recursos: filtro por userId del JWT</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h4>Capa 4 — Negocio</h4>
+                    <ul>
+                        <li>Token HMAC de cola (sin Keycloak)</li>
+                        <li>Idempotencia de pagos</li>
+                        <li>Límite 3 tickets/usuario</li>
+                        <li>Locks Redis por usuario+zona</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">12</span>
+</section>
+
+<!-- ==============================
+     SLIDE 13: RESILIENCIA Y CONCURRENCIA
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 11</span>
+        <h2 class="slide-section-title">Resiliencia y concurrencia</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div class="info-card">
+                    <h4>Circuit Breakers — Resilience4j</h4>
+                    <p>3 breakers independientes: <span class="mono-accent">catalog</span>, <span class="mono-accent">reservation</span>, <span class="mono-accent">payment</span>. Ventana deslizante 10 llamadas, umbral 50%, estado abierto 10s. Time limiter 5s. Rate limiter global: 100 req/min.</p>
+                </div>
+                <div class="info-card">
+                    <h4>Virtual Threads (Java 21)</h4>
+                    <p>Millones de threads virtuales con código imperativo. I/O-bound: el thread se desmonta durante bloqueo y se reanuda al recibir respuesta. Stack traces lineales y legibles.</p>
+                </div>
+                <div class="info-card">
+                    <h4>Fallback multinivel</h4>
+                    <ul>
+                        <li>Circuit breaker abierto → HTTP 503 controlado (no timeout)</li>
+                        <li>Redis caído → SETNX falla, reservas rechazadas (409)</li>
+                        <li>Keyspace notifications perdidas → barrido periódico cada 60s</li>
+                        <li>Redpanda caído → eventos se acumulan, se procesan al recuperar</li>
+                    </ul>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);letter-spacing:1px;">RESULTADOS PRUEBAS DE CARGA (k6)</p>
+                <table class="spec-table">
+                    <thead><tr><th>Escenario</th><th>VUs</th><th>p95</th><th>Errores</th></tr></thead>
+                    <tbody>
+                        <tr><td>Catalog Read (Docker)</td><td class="td-key">2000</td><td>1.41s</td><td class="td-val">0%</td></tr>
+                        <tr><td>Catalog Read (K3s)</td><td class="td-key">500</td><td>1.55s</td><td class="td-val">0%</td></tr>
+                        <tr><td>Catalog Read (K3s max)</td><td class="td-key">5000</td><td>32.38s</td><td style="color:var(--amber);">92.56%</td></tr>
+                        <tr><td>Queue (K3s, 1 pod)</td><td class="td-key">200</td><td>676ms</td><td class="td-val">0%</td></tr>
+                        <tr><td>Reservation Contention</td><td class="td-key">1000</td><td>3,170ms</td><td class="td-val">0%</td></tr>
+                    </tbody>
+                </table>
+                <div class="box-highlight">
+                    <p style="font-size:14px;"><span class="amber-accent">Hallazgos:</span> cuello de botella en ~2,300 req/s (MongoDB nodo único). 5K VUs contra K3s colapsan por límites TCP del VPS, no del backend. Cola virtual y anti-overbooking funcionan impecablemente.</p>
+                </div>
+                <p style="font-family:var(--font-display);font-size:13px;color:var(--text-dim);line-height:1.5;">
+                    <span class="amber-accent">Próximas optimizaciones:</span> MongoDB replica set, PgBouncer, 3 réplicas monolito + HPA, optimización queries.
+                </p>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">13</span>
+</section>
+
+<!-- ==============================
+     SLIDE 14: CAP THEOREM
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 12</span>
+        <h2 class="slide-section-title">Análisis CAP Theorem</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <p style="font-family:var(--font-display);font-size:19px;color:var(--text-primary);font-weight:500;margin-bottom:22px;">
+            El sistema <span class="amber-accent">no adopta una única postura CAP</span>. Cada bounded context elige la estrategia adecuada a su caso de uso.
+        </p>
+        <div class="cap-grid" style="margin-bottom:18px;">
+            <div class="cap-card">
+                <h5>Reservation</h5>
+                <span class="cap-choice cp">CP</span>
+                <p>Cero overbooking no negociable. SELECT FOR UPDATE + SETNX garantizan consistencia.</p>
+            </div>
+            <div class="cap-card">
+                <h5>Payment</h5>
+                <span class="cap-choice cp">CP</span>
+                <p>Transacciones financieras requieren consistencia absoluta. Idempotencia vía UNIQUE.</p>
+            </div>
+            <div class="cap-card">
+                <h5>Catalog</h5>
+                <span class="cap-choice ap">AP</span>
+                <p>Read-heavy. Inconsistencia temporal (ms) aceptable. Disponibilidad de lectura priorizada.</p>
+            </div>
+            <div class="cap-card">
+                <h5>Virtual Queue</h5>
+                <span class="cap-choice ap">AP</span>
+                <p>Redis standalone. Cola se pierde si cae — usuarios reintentan. CP no soportaría 500K+ ops/s.</p>
+            </div>
+            <div class="cap-card">
+                <h5>Redpanda</h5>
+                <span class="cap-choice cp">CP</span>
+                <p>Raft consensus. Eventos de dominio no se pierden ni duplican durante partición.</p>
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+            <div class="box-highlight"><p style="font-size:14px;"><span class="amber-accent">Caída PostgreSQL:</span> Reservation deja de aceptar (503). Circuit breakers abren. Usuarios esperan en cola (Redis AP). Al recuperar, el sistema reanuda.</p></div>
+            <div class="box-highlight"><p style="font-size:14px;"><span class="amber-accent">Caída Redis:</span> Cola desaparece (AP). Locks fallan → nuevas reservas rechazadas (409). Reservas existentes no se corrompen.</p></div>
+            <div class="box-highlight"><p style="font-size:14px;"><span class="amber-accent">Partición de red:</span> Catalog→Reservation: fail-close. Reservation↔Payment: eventos acumulados en Redpanda, Raft garantiza no pérdida.</p></div>
+        </div>
+    </div>
+    <span class="slide-num">14</span>
+</section>
+
+<!-- ==============================
+     SLIDE 15: OBSERVABILIDAD
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 13</span>
+        <h2 class="slide-section-title">Observabilidad — Tres pilares CNCF</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <table class="spec-table">
+                    <thead><tr><th>Componente</th><th>Propósito</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">Loki</td><td>Agregación de logs JSON desde Logback vía Promtail</td></tr>
+                        <tr><td class="td-key">Prometheus</td><td>Scrapea /actuator/prometheus cada 15s. Métricas JVM, HTTP y de negocio</td></tr>
+                        <tr><td class="td-key">Tempo</td><td>Spans OTLP del OpenTelemetry Java Agent. Trazabilidad cross-module</td></tr>
+                        <tr><td class="td-key">Grafana</td><td>Dashboards unificados. OAuth2 con Keycloak (roles grafana-*)</td></tr>
+                    </tbody>
+                </table>
+                <div class="info-card">
+                    <h4>Métricas custom de negocio</h4>
+                    <table class="spec-table">
+                        <thead><tr><th>Métrica</th><th>Tipo</th></tr></thead>
+                        <tbody>
+                            <tr><td class="td-key">reservations.created</td><td>Counter (por evento, zona)</td></tr>
+                            <tr><td class="td-key">reservations.expired</td><td>Counter</td></tr>
+                            <tr><td class="td-key">reservations.confirmed</td><td>Counter (→ SOLD)</td></tr>
+                            <tr><td class="td-key">reservations.cancelled</td><td>Counter</td></tr>
+                            <tr><td class="td-key">reservations.active</td><td>Gauge (en este momento)</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div class="info-card">
+                    <h4>Trazabilidad end-to-end</h4>
+                    <p>Cada petición HTTP incluye <span class="mono-accent">traceId</span> generado por OpenTelemetry. Se propaga a través de:</p>
+                    <ul>
+                        <li>Logs — Logback incluye trace_id en JSON</li>
+                        <li>HTTP calls — instrumentación automática</li>
+                        <li>Database — drivers JDBC y MongoDB instrumentados</li>
+                        <li>Redpanda — contexto de tracing en cabeceras</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h4>Acceso Grafana por roles</h4>
+                    <table class="spec-table">
+                        <thead><tr><th>Rol Keycloak</th><th>Rol Grafana</th></tr></thead>
+                        <tbody>
+                            <tr><td class="td-key">grafana-admin</td><td>Admin (completo)</td></tr>
+                            <tr><td class="td-key">grafana-editor</td><td>Editor</td></tr>
+                            <tr><td class="td-key">grafana-viewer</td><td>Viewer (solo lectura)</td></tr>
+                            <tr><td>Sin rol grafana-*</td><td style="color:var(--amber);">Login rechazado</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="box-highlight">
+                    <p style="font-size:14px;"><span class="amber-accent">Stack unificado:</span> Loki + Prometheus + Tempo → Grafana. Tres pilares integrados en dashboards preconfigurados. Acceso externo vía Traefik en <span class="mono-accent">/panel</span>.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">15</span>
+</section>
+
+<!-- ==============================
+     SLIDE 16: DESPLIEGUE
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 14</span>
+        <h2 class="slide-section-title">Despliegue — K3s sobre VPS</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-display);font-size:18px;color:var(--text-primary);font-weight:500;line-height:1.5;">
+                    Clúster <span class="amber-accent">K3s single-node</span> sobre VPS OVH (6 CPU, 12 GB RAM, ~12€/mes). Elegido sobre cloud gestionada por coste, simplicidad y suficiencia para el bootcamp.
+                </p>
+                <table class="spec-table">
+                    <thead><tr><th>Namespace</th><th>Servicios</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">infrastructure</td><td>PostgreSQL, MongoDB, Redis, Redpanda, Keycloak</td></tr>
+                        <tr><td class="td-key">ticket-monster</td><td>Monolito (Deployment + HPA), 2 Ingress</td></tr>
+                        <tr><td class="td-key">observability</td><td>Prometheus, Loki, Tempo, Grafana</td></tr>
+                        <tr><td class="td-key">cert-manager</td><td>Certificados TLS (Let's Encrypt)</td></tr>
+                    </tbody>
+                </table>
+                <div class="info-card">
+                    <h4>Infraestructura como código</h4>
+                    <ul>
+                        <li><span class="mono-accent">k3s-provision.sh</span> — Instalar K3s, cert-manager</li>
+                        <li><span class="mono-accent">k3s-infrastructure.sh</span> — Bases de datos, Keycloak, Redpanda</li>
+                        <li><span class="mono-accent">k3s-publish-app.sh</span> — Build Docker → push ghcr.io → Helm install</li>
+                        <li><span class="mono-accent">deploy.sh</span> — Orquestador completo</li>
+                    </ul>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <p style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);letter-spacing:1px;">HELM CHARTS (13 en total)</p>
+                <table class="spec-table">
+                    <thead><tr><th>Chart</th><th>Recurso</th><th>Storage</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">ticketmonster</td><td>Deployment + Ingress</td><td>—</td></tr>
+                        <tr><td class="td-key">postgresql</td><td>StatefulSet</td><td>PVC 10 Gi</td></tr>
+                        <tr><td class="td-key">mongodb</td><td>StatefulSet</td><td>PVC 10 Gi</td></tr>
+                        <tr><td class="td-key">redis</td><td>StatefulSet</td><td>PVC 5 Gi</td></tr>
+                        <tr><td class="td-key">redpanda</td><td>StatefulSet</td><td>PVC 10 Gi</td></tr>
+                        <tr><td class="td-key">keycloak</td><td>Deployment</td><td>PostgreSQL</td></tr>
+                    </tbody>
+                </table>
+                <div class="box-highlight">
+                    <p style="font-size:14px;"><span class="amber-accent">TLS:</span> cert-manager + Let's Encrypt ACME. ClusterIssuer HTTP-01 vía Traefik. Renovación automática 30 días antes de expiración. Dominio: <span class="mono-accent">*.janrax.es</span>.</p>
+                </div>
+                <p style="font-family:var(--font-display);font-size:13px;color:var(--text-dim);line-height:1.6;">
+                    <span class="amber-accent">Routing dual:</span> 2 Ingress separados — <span class="mono-accent">/graphql</span> (público, sin rate limit) y <span class="mono-accent">/api/*</span> (con rate limit). Catálogo no compite por rate limit con escritura.
+                </p>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">16</span>
+</section>
+
+<!-- ==============================
+     SLIDE 17: TECH STACK
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 16</span>
+        <h2 class="slide-section-title">Tech Stack con justificaciones</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal" style="overflow:hidden;">
+        <table class="tech-table" style="font-size:14px;">
+            <thead><tr><th style="width:15%;">Tecnología</th><th style="width:22%;">Uso</th><th style="width:38%;">Justificación</th><th style="width:25%;">Trade-off</th></tr></thead>
+            <tbody>
+                <tr class="cat-row"><td colspan="4">BACKEND</td></tr>
+                <tr><td class="td-key">Spring Boot 4.0.6</td><td>Framework</td><td>Virtual Threads nativos. Spring Security, GraphQL, JPA, Kafka, Redis, Actuator.</td><td>Quarkus (serverless), Micronaut (menor adopción).</td></tr>
+                <tr><td class="td-key">Spring Modulith 2.0.6</td><td>Monolito modular</td><td>Fronteras estrictas. Verifica acoplamiento en tests. Prepara extracción.</td><td>Sin verificación → riesgo big ball of mud.</td></tr>
+                <tr><td class="td-key">Spring for GraphQL</td><td>API catálogo</td><td>Schema-first: SDL es fuente de verdad. Evita over-fetching.</td><td>REST (over-fetching en catálogo heterogéneo).</td></tr>
+                <tr><td class="td-key">Resilience4j 2.3.0</td><td>Circuit breaker</td><td>Ligero, métricas integradas con Micrometer.</td><td>Hystrix (deprecado).</td></tr>
+                <tr><td class="td-key">HikariCP</td><td>Pool JDBC</td><td>Pool de conexiones más rápido en benchmarks.</td><td>Tomcat DBCP2 (más lento).</td></tr>
+                <tr class="cat-row"><td colspan="4">PERSISTENCIA</td></tr>
+                <tr><td class="td-key">PostgreSQL 16</td><td>Reservas, Pagos</td><td>ACID, SELECT FOR UPDATE, schemas separados.</td><td>MySQL (limitaciones con FOR UPDATE).</td></tr>
+                <tr><td class="td-key">MongoDB 7</td><td>Catálogo</td><td>Schema flexible, documentos embebidos, full-text search nativo.</td><td>PostgreSQL JSONB (menor rendimiento en docs anidados).</td></tr>
+                <tr><td class="td-key">Redis 7</td><td>Colas, Locks</td><td>Ops atómicas en µs, LIST/SET/HASH/SETNX nativos.</td><td>Hazelcast (embebido, añade clustering).</td></tr>
+                <tr class="cat-row"><td colspan="4">MENSAJERÍA + SEGURIDAD + ORQUESTACIÓN</td></tr>
+                <tr><td class="td-key">Redpanda v24.3.5</td><td>Event streaming</td><td>Kafka-compatible, single binary, Raft consensus.</td><td>Apache Kafka (ZooKeeper, más pesado).</td></tr>
+                <tr><td class="td-key">Keycloak 26.1</td><td>IAM / OAuth2</td><td>Open source, realms/roles, integración Spring Security.</td><td>Auth0/Okta (SaaS, coste recurrente).</td></tr>
+                <tr><td class="td-key">Traefik + cert-manager</td><td>Ingress + TLS</td><td>Nativo K3s, middlewares CRD, Let's Encrypt ACME.</td><td>NGINX Ingress Controller.</td></tr>
+                <tr><td class="td-key">K3s + Helm</td><td>Orquestación</td><td>Kubernetes ligero, single binary, charts versionados.</td><td>k0s, MicroK8s.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <span class="slide-num">17</span>
+</section>
+
+<!-- ==============================
+     SLIDE 18: EVOLUCION
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 15</span>
+        <h2 class="slide-section-title">Estrategia de evolución — Monolith First</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col">
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                <p style="font-family:var(--font-display);font-size:18px;color:var(--text-primary);font-weight:500;line-height:1.5;">
+                    Principio de <span class="amber-accent">Monolith First</span> (Martin Fowler): comenzar como monolito modular y extraer microservicios solo cuando las necesidades del negocio lo justifiquen.
+                </p>
+                <table class="spec-table">
+                    <thead><tr><th>Criterio de extracción</th><th>Ejemplo en Ticket Monster</th></tr></thead>
+                    <tbody>
+                        <tr><td class="td-key">Escalado independiente</td><td>Catalog: 10 réplicas lectura vs Reservation: 2 réplicas + CPU</td></tr>
+                        <tr><td class="td-key">Ciclos de release</td><td>Catalog: cambios diarios vs Payment: despliegues mensuales</td></tr>
+                        <tr><td class="td-key">Tecnología específica</td><td>Payment → Node.js (Stripe). Queue → Go (mínima latencia)</td></tr>
+                        <tr><td class="td-key">Aislamiento de fallos</td><td>Memory leak en Catalog no debe tumbar reservas activas</td></tr>
+                        <tr><td class="td-key">Escalado organizacional</td><td>Múltiples equipos con propiedad exclusiva</td></tr>
+                    </tbody>
+                </table>
+                <div class="info-card">
+                    <h4>Preparación actual (3 elementos clave)</h4>
+                    <ul>
+                        <li>Comunicación asíncrona vía Redpanda ya establecida</li>
+                        <li>Schemas PostgreSQL separados por bounded context</li>
+                        <li>Interfaces para dependencias síncronas (AvailabilityService → gRPC futuro)</li>
+                    </ul>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                <p style="font-family:var(--font-mono);font-size:12px;color:var(--cyan);letter-spacing:1px;">ROADMAP TENTATIVO</p>
+                <div class="layer-card layer-1">
+                    <h5>Fase 1 — Actual</h5>
+                    <p>Monolito modular con Spring Modulith. Verificación arquitectónica automática. Validar producto y flujos de negocio.</p>
+                </div>
+                <div class="layer-card" style="border-left-color:rgba(34,211,238,0.5);">
+                    <h5>Fase 2 — Extracción Catalog</h5>
+                    <p>Trigger: throughput lectura > 10K req/s. Microservicio Spring Boot + MongoDB dedicado. gRPC para availability, Redpanda para eventos.</p>
+                </div>
+                <div class="layer-card" style="border-left-color:rgba(34,211,238,0.35);">
+                    <h5>Fase 3 — Extracción Payment</h5>
+                    <p>Trigger: integración pasarela de pago real. Microservicio independiente (posiblemente otro lenguaje). Comunicación vía Redpanda sin cambios.</p>
+                </div>
+                <div class="layer-card" style="border-left-color:rgba(245,158,11,0.3);">
+                    <h5>Fase 4 — Extracción Virtual Queue</h5>
+                    <p>Trigger: latencia < 10ms p99 para 1M+ usuarios. Servicio en Go/Rust pegado a Redis. Protocolo token HMAC se mantiene.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">18</span>
+</section>
+
+<!-- ==============================
+     SLIDE 19: TRADE-OFFS
+     ============================== -->
+<section class="slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="slide-header reveal">
+        <span class="slide-section-tag">Sección 17</span>
+        <h2 class="slide-section-title">Decisiones arquitectónicas y trade-offs</h2>
+    </div>
+    <div class="header-rule reveal"></div>
+    <div class="slide-body reveal">
+        <div class="two-col" style="gap:24px;">
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                <div class="info-card">
+                    <h4>API Gateway → Traefik</h4>
+                    <p>Gateway añadía ~50-100ms y era punto único de fallo. Se delegó TLS, rate limiting, CORS a Traefik. Trade-off: pérdida de granularidad por endpoint.</p>
+                </div>
+                <div class="info-card">
+                    <h4>Token HMAC vs JWT Keycloak</h4>
+                    <p>HMAC local tarda µs vs decenas de ms de HTTP a Keycloak. Sin dependencia externa en path caliente. Trade-off: no es OAuth2 estándar.</p>
+                </div>
+                <div class="info-card">
+                    <h4>Redis SETNX vs PostgreSQL advisory locks</h4>
+                    <p>TTL automático sin locks huérfanos. Keyspace notifications restauran stock. Trade-off: Redis es dependencia externa adicional en path crítico.</p>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                <div class="info-card">
+                    <h4>MongoDB + PostgreSQL (políglota)</h4>
+                    <p>Schema flexible para catálogo + ACID para transacciones. Trade-off: dos motores → doble backup, doble configuración operacional.</p>
+                </div>
+                <div class="info-card">
+                    <h4>Virtual Threads vs WebFlux</h4>
+                    <p>Código imperativo legible con mismo rendimiento I/O no bloqueante. Stack traces lineales. Trade-off: sin ventaja en CPU-bound puro.</p>
+                </div>
+                <div class="info-card">
+                    <h4>Rate limiting: edge vs app</h4>
+                    <p>Traefik rechaza antes de llegar al monolito. Resilience4j como backstop intra-app. Trade-off: granularidad por Ingress, no por endpoint individual.</p>
+                </div>
+                <div class="box-highlight" style="margin-top:6px;">
+                    <p style="font-size:14px;"><span class="amber-accent">Filosofía:</span> cada decisión documenta evidencia (pruebas k6), justificación técnica y contrapartida aceptada. No hay decisiones perfectas — solo trade-offs explícitos.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-num">19</span>
+</section>
+
+<!-- ==============================
+     SLIDE 20: CIERRE
+     ============================== -->
+<section class="slide closing-slide">
+    <div class="slide-topbar"></div>
+    <div class="slide-tl"></div><div class="slide-br"></div>
+    <div class="closing-content">
+        <p style="font-family:var(--font-mono);font-size:14px;color:var(--cyan);letter-spacing:3px;text-transform:uppercase;margin-bottom:30px;" class="reveal">Documento de Arquitectura de Software</p>
+        <h2 class="closing-title reveal"><span style="color:var(--cyan);">Ticket</span> Monster</h2>
+        <p class="closing-sub reveal">Arquitecturas Backend a Gran Escala con Java — Julio 2026</p>
+        <div class="closing-meta reveal">
+            <p style="margin-bottom:8px;">Juan Ramón Gavilanes Sánchez</p>
+            <p>Versión 1.0 · 17 secciones · 3 anexos · 53 términos en glosario</p>
+        </div>
+    </div>
+    <div class="ring-deco" style="right:140px;bottom:220px;opacity:0.15;"></div>
+    <span class="slide-num">20</span>
+</section>
+
+</main>
+</div>
+
+<div class="nav-indicator" id="navIndicator">
+    <span id="currentSlideNum">01</span> / <span id="totalSlideNum">20</span>
+</div>
+
+<script>
+/* ===========================================
+   SLIDE PRESENTATION CONTROLLER
+   =========================================== */
+class SlidePresentation {
+    constructor() {
+        this.slides = document.querySelectorAll('.slide');
+        this.currentSlide = 0;
+        this.stage = document.getElementById('deckStage');
+        this.totalSlides = this.slides.length;
+        this.setupStageScale();
+        this.setupKeyboardNav();
+        this.setupTouchNav();
+        this.setupWheelNav();
+        this.setupEditMode();
+        this.showSlide(0);
+    }
+
+    setupStageScale() {
+        const scale = () => {
+            const factor = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+            const x = (window.innerWidth - 1920 * factor) / 2;
+            const y = (window.innerHeight - 1080 * factor) / 2;
+            this.stage.style.transform = `translate(${x}px, ${y}px) scale(${factor})`;
+        };
+        scale();
+        window.addEventListener('resize', scale);
+    }
+
+    setupKeyboardNav() {
+        document.addEventListener('keydown', (e) => {
+            if (e.target.getAttribute('contenteditable') === 'true') return;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+                e.preventDefault();
+                this.showSlide(this.currentSlide + 1);
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.showSlide(this.currentSlide - 1);
+            } else if (e.key === 'PageDown') {
+                e.preventDefault();
+                this.showSlide(this.currentSlide + 1);
+            } else if (e.key === 'PageUp') {
+                e.preventDefault();
+                this.showSlide(this.currentSlide - 1);
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                this.showSlide(0);
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                this.showSlide(this.slides.length - 1);
+            }
+        });
+    }
+
+    setupTouchNav() {
+        let startX = 0, startY = 0;
+        document.addEventListener('touchstart', (e) => {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        });
+        document.addEventListener('touchend', (e) => {
+            const dx = e.changedTouches[0].clientX - startX;
+            const dy = e.changedTouches[0].clientY - startY;
+            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
+                this.showSlide(this.currentSlide + (dx < 0 ? 1 : -1));
+            } else if (Math.abs(dy) > 50) {
+                this.showSlide(this.currentSlide + (dy < 0 ? 1 : -1));
+            }
+        });
+    }
+
+    setupWheelNav() {
+        let wheelCooldown = false;
+        document.addEventListener('wheel', (e) => {
+            if (wheelCooldown) return;
+            wheelCooldown = true;
+            setTimeout(() => { wheelCooldown = false; }, 800);
+            if (e.deltaY > 0 || e.deltaX > 0) {
+                this.showSlide(this.currentSlide + 1);
+            } else if (e.deltaY < 0 || e.deltaX < 0) {
+                this.showSlide(this.currentSlide - 1);
+            }
+        }, { passive: true });
+    }
+
+    showSlide(index) {
+        this.currentSlide = Math.max(0, Math.min(index, this.slides.length - 1));
+        this.slides.forEach((slide, i) => {
+            slide.classList.toggle('active', i === this.currentSlide);
+            slide.classList.toggle('visible', i === this.currentSlide);
+        });
+        document.getElementById('currentSlideNum').textContent =
+            String(this.currentSlide + 1).padStart(2, '0');
+        document.getElementById('totalSlideNum').textContent = this.totalSlides;
+    }
+
+    /* Inline editing support */
+    setupEditMode() {
+        this.editActive = false;
+
+        const hotzone = document.querySelector('.edit-hotzone');
+        const editToggle = document.getElementById('editToggle');
+        let hideTimeout = null;
+
+        hotzone.addEventListener('mouseenter', () => {
+            clearTimeout(hideTimeout);
+            editToggle.classList.add('show');
+        });
+        hotzone.addEventListener('mouseleave', () => {
+            hideTimeout = setTimeout(() => {
+                if (!this.editActive) editToggle.classList.remove('show');
+            }, 400);
+        });
+        editToggle.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
+        editToggle.addEventListener('mouseleave', () => {
+            hideTimeout = setTimeout(() => {
+                if (!this.editActive) editToggle.classList.remove('show');
+            }, 400);
+        });
+
+        editToggle.addEventListener('click', () => this.toggleEditMode());
+        hotzone.addEventListener('click', () => this.toggleEditMode());
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.key === 'e' || e.key === 'E') &&
+                !e.target.getAttribute('contenteditable') &&
+                !e.ctrlKey && !e.metaKey && !e.altKey) {
+                this.toggleEditMode();
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                if (this.editActive) this.saveEdits();
+            }
+        });
+    }
+
+    toggleEditMode() {
+        this.editActive = !this.editActive;
+        const editToggle = document.getElementById('editToggle');
+        editToggle.classList.toggle('active', this.editActive);
+        if (this.editActive) {
+            editToggle.classList.add('show');
+            editToggle.textContent = '💾';
+            this.makeEditable();
+        } else {
+            editToggle.textContent = '✏';
+            this.makeNonEditable();
+            this.saveEdits();
+        }
+    }
+
+    makeEditable() {
+        const selectors = 'h1, h2, h3, h4, h5, p, li, span:not(.slide-num):not(.agenda-num):not(.flow-step-num):not(.step-endpoint):not(.mono-accent):not(.meta-dot):not(.layer-tech), .metric-label, .metric-detail, .td-val, .info-card h4, .info-card p';
+        document.querySelectorAll('.slide').forEach(slide => {
+            slide.querySelectorAll(selectors).forEach(el => {
+                el.setAttribute('contenteditable', 'true');
+            });
+        });
+    }
+
+    makeNonEditable() {
+        document.querySelectorAll('[contenteditable="true"]').forEach(el => {
+            el.removeAttribute('contenteditable');
+        });
+    }
+
+    saveEdits() {
+        const data = {};
+        this.slides.forEach((slide, i) => {
+            const texts = [];
+            slide.querySelectorAll('[contenteditable="true"]').forEach(el => {
+                texts.push(el.textContent);
+            });
+            data[i] = texts;
+        });
+        localStorage.setItem('ticket-monster-ppt-edits', JSON.stringify(data));
+        console.log('Edits saved to localStorage.');
+    }
+}
+
+new SlidePresentation();
+</script>
+</body>
+</html>
