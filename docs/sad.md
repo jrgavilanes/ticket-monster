@@ -33,9 +33,10 @@
    - 5.3 [REST API — Reservas](#53-rest-api--reservas)
    - 5.4 [REST API — Pagos](#54-rest-api--pagos)
 6. [Modelo de datos](#6-modelo-de-datos)
-   - 6.1 [MongoDB — Catálogo](#61-mongodb--catálogo)
-   - 6.2 [PostgreSQL — Reservas y Pagos](#62-postgresql--reservas-y-pagos)
-   - 6.3 [Redis — Colas y Locks](#63-redis--colas-y-locks)
+    - 6.1 [MongoDB — Catálogo](#61-mongodb--catálogo)
+    - 6.2 [PostgreSQL — Reservas y Pagos](#62-postgresql--reservas-y-pagos)
+    - 6.3 [Redis — Colas y Locks](#63-redis--colas-y-locks)
+    - 6.4 [Estimación de capacidad y dimensionamiento de hardware](#64-estimación-de-capacidad-y-dimensionamiento-de-hardware)
 7. [Mecanismo anti-overbooking](#7-mecanismo-anti-overbooking)
 8. [Estrategia de Fila Virtual](#8-estrategia-de-fila-virtual)
 9. [Comunicación asíncrona](#9-comunicación-asíncrona)
@@ -893,6 +894,201 @@ Redis se eligió para colas y locks porque:
 | `DELETE /reservations/{id}` | `DEL reservation:{eventId}:{zoneId}:{userId}` (liberar lock). |
 
 
+### 6.4 Estimación de capacidad y dimensionamiento de hardware
+
+Esta sección traduce el modelo de datos y las métricas de escala objetivo a requisitos concretos de almacenamiento y procesamiento. El cálculo parte del tamaño estimado de cada registro y lo proyecta sobre los volúmenes anuales esperados.
+
+#### 6.4.1 Tamaño de registros por entidad
+
+Las estimaciones de tamaño incluyen overhead de motor de base de datos (headers de tupla en PostgreSQL, field names y type markers en BSON de MongoDB, metadata interna de Redis).
+
+**MongoDB (documentos BSON):**
+
+| Entidad | Campos | Tamaño unitario |
+|---|---|---|
+| `Event` | `_id`, `name`, `description`, `type`, `date`, `endDate`, `venueId`, `artistIds[]`, `zones[]` (≈5 embebidos), `status`, `createdAt`, `updatedAt` | ~1 KB |
+| `Venue` | `_id`, `name`, `description`, `location{}` (6 campos), `totalCapacity`, `layoutType` | ~400 B |
+| `Artist` | `_id`, `name`, `genre`, `bio`, `imageUrl` | ~500 B |
+
+**PostgreSQL (tuplas + overhead de 28 B por fila):**
+
+| Tabla | Esquema | Tamaño unitario |
+|---|---|---|
+| `reservations` | `reservation` | ~140 B |
+| `reservation_items` | `reservation` | ~84 B |
+| `zone_stock` | `reservation` | ~72 B |
+| `payments` | `payment` | ~176 B |
+| `payment_audit` | `payment` | ~128 B |
+
+**Redis (keys + metadata interna):**
+
+| Patrón de key | Tamaño por entrada |
+|---|---|
+| `queue:{eventId}` (LIST, userId) | ~50 B |
+| `queue:members:{eventId}` (SET, userId) | ~50 B |
+| `queue:turn:{eventId}` (HASH, userId→1) | ~60 B |
+| `reservation:{ev}:{zone}:{user}` (STRING, lock) | ~200 B |
+
+#### 6.4.2 Proyección de volúmenes de datos
+
+**Supuestos de negocio** alineados con las métricas objetivo de la sección 2.2:
+
+| Parámetro | Valor | Justificación |
+|---|---|---|
+| DAU | 50 M | NFR-02 |
+| Tasa de conversión a compra | 0.2 % | ~1 de cada 500 navegaciones termina en compra en ticketing masivo |
+| Tickets vendidos / día | 100 000 | 50 M × 0.2 % |
+| Tickets vendidos / año | 36.5 M | — |
+| Reservas / año | 18 M | ~2 tickets de media por reserva |
+| Pagos / año | 18 M | Una reserva → un pago |
+| Auditorías / pago | 2 | `PENDING→CONFIRMED`, posible `CONFIRMED→REFUNDED` |
+| Eventos activos / año | 500 | Rotación de catálogo |
+| Zones / evento | 5 | Media entre pequeñas (2) y grandes (8+) |
+| Zonas totales (zone_stock) | 2 500 | 500 eventos × 5 zonas |
+| Pico usuarios en cola | 5 M | NFR-03 |
+| Pico reservas activas simultáneas | 350 000 | ~5 eventos en venta simultánea × 70 K capacidad |
+
+#### 6.4.3 Requisitos de almacenamiento
+
+**MongoDB — Catálogo:**
+
+| Concepto | Cálculo | Total |
+|---|---|---|
+| Events | 500 × 1 KB | 0.5 MB |
+| Venues | 50 × 400 B | 20 KB |
+| Artists | 200 × 500 B | 100 KB |
+| **Datos brutos** | — | **~0.6 MB** |
+| Índices (≈ 2× datos) | índices compuestos: type+date, venueId, status, texto | ~1.2 MB |
+| **Total MongoDB** | — | **~2 MB** |
+
+El catálogo es pequeño en volumen de datos pero intensivo en lecturas (~10 K+ req/s en picos). El almacenamiento no es el factor limitante.
+
+**PostgreSQL — Reservas (schema `reservation`):**
+
+| Concepto | Cálculo | Año 1 | Año 3 |
+|---|---|---|---|
+| `reservations` | 18 M/año × 140 B | 2.5 GB | 7.5 GB |
+| `reservation_items` | 36.5 M/año × 84 B | 3.1 GB | 9.2 GB |
+| `zone_stock` | 2 500 filas × 72 B | < 1 MB | < 1 MB |
+| Índices | ~100 % del tamaño de datos | 5.6 GB | 16.8 GB |
+| WAL, autovacuum, bloat | ~50 % adicional | 5.6 GB | 16.8 GB |
+| **Total schema reservation** | — | **~17 GB** | **~51 GB** |
+
+**PostgreSQL — Pagos (schema `payment`):**
+
+| Concepto | Cálculo | Año 1 | Año 3 |
+|---|---|---|---|
+| `payments` | 18 M/año × 176 B | 3.2 GB | 9.5 GB |
+| `payment_audit` | 36.5 M/año × 128 B | 4.7 GB | 14.0 GB |
+| Índices | ~100 % del tamaño de datos | 7.9 GB | 23.5 GB |
+| WAL, autovacuum, bloat | ~50 % adicional | 7.9 GB | 23.5 GB |
+| **Total schema payment** | — | **~24 GB** | **~71 GB** |
+
+| **Total PostgreSQL** | — | **~41 GB** | **~122 GB** |
+
+**Redis:**
+
+| Concepto | Cálculo | Total |
+|---|---|---|
+| Cola FIFO (pico 5 M usuarios) | 5 M × 50 B | 250 MB |
+| Set de miembros (idempotencia) | 5 M × 50 B | 250 MB |
+| Hash de turnos listos | batch de 500 usuarios activos × 60 B | < 1 MB |
+| Locks de reserva (pico 350 K) | 350 K × 200 B | 70 MB |
+| Overhead interno Redis | ~30 % | ~170 MB |
+| **Total Redis pico** | — | **~750 MB** |
+| **PV recomendado (margen 3×)** | — | **5 Gi** |
+
+Redis opera casi enteramente en memoria. La persistencia RDB/AOF se usa solo para recuperación tras caída, no como almacenamiento primario. El pico de 750 MB es transitorio — fuera de eventos masivos el consumo es mínimo (< 50 MB).
+
+#### 6.4.4 Requisitos de procesamiento
+
+**Throughput por componente en hora pico de apertura de venta:**
+
+| Componente | Operación | Throughput pico | Operaciones / s |
+|---|---|---|---|
+| Catalog (GraphQL) | Lectura de eventos y disponibilidad | 10 K req/s | 12 K queries MongoDB + 5 K queries PostgreSQL |
+| Virtual Queue | `POST /join`, `GET /status`, `GET /token` | 200 K ops/s | 200 K operaciones Redis |
+| Reservation | `POST /`, `GET /{id}`, `DELETE /{id}` | 250 reservas/s | ~750 transacciones PostgreSQL + 250 SETNX Redis |
+| Payment | `POST /`, `POST /{id}/confirm` | 250 pagos/s | ~500 transacciones PostgreSQL |
+
+**Dimensionamiento de réplicas del monolito (cada réplica = 1 vCPU, 2 Gi RAM):**
+
+| Módulo | Throughput por réplica (observado en k6) | Réplicas mínimas | Notas |
+|---|---|---|---|
+| Catalog | ~500 req/s GraphQL | **20** | Principal consumidor de réplicas. Escalar con HPA. |
+| Virtual Queue | ~500 req/s REST | **3** | Redis es el límite real, no el monolito. |
+| Reservation | ~100 reservas/s | **3** | Limitado por PostgreSQL, no por el monolito. |
+| Payment | ~200 pagos/s | **2** | Menor demanda que Reservation. |
+
+| **Total réplicas** | — | **~28** | En pico. HPA reduce a ~5 en valle. |
+
+Las réplicas no se despliegan por módulo (es un monolito) — el cálculo se desglosa para entender qué módulo presiona el escalado. En la práctica, todas las réplicas ejecutan los 4 módulos y HPA escala basado en CPU/memoria agregada.
+
+#### 6.4.5 Dimensionamiento del clúster K3s
+
+Partiendo de los requisitos de almacenamiento y procesamiento, el clúster de producción se dimensiona en tres tiers:
+
+**Tier 1 — Nodos de aplicación (monolito + edge):**
+
+| Recurso | Cantidad | Notas |
+|---|---|---|
+| Nodos worker | 4 × (4 vCPU, 8 Gi RAM) | ~7 réplicas del monolito por nodo en pico |
+| Traefik | 2 réplicas | Ingress controller, integrado en K3s |
+| **Total vCPU app** | **16** | — |
+| **Total RAM app** | **32 Gi** | — |
+
+**Tier 2 — Nodos de bases de datos:**
+
+| Servicio | Instancias | vCPU | RAM | Disco (PV) | Notas |
+|---|---|---|---|---|---|
+| PostgreSQL | 1 primario + 1 réplica | 4 + 2 | 8 Gi + 4 Gi | 200 Gi SSD | PV dimensionado para 3 años (122 Gi datos + margen). PgBouncer sidecar. |
+| MongoDB | 1 primario + 2 secundarios (replica set) | 2 + 1 + 1 | 4 Gi + 2 Gi + 2 Gi | 10 Gi SSD c/u | Datos pequeños (~2 MB). Lecturas se distribuyen entre secundarios. |
+| Redis | 2 (sentinel) | 1 c/u | 2 Gi c/u | 10 Gi SSD c/u | Sentinel para failover automático. Sin persistencia en caliente. |
+
+**Tier 3 — Mensajería y observabilidad:**
+
+| Servicio | Instancias | vCPU | RAM | Disco (PV) | Notas |
+|---|---|---|---|---|---|
+| Redpanda | 3 brokers | 2 c/u | 4 Gi c/u | 50 Gi SSD c/u | Raft requiere 3 nodos para consenso. Retención: 7 días. |
+| Keycloak | 1 | 1 | 2 Gi | 5 Gi | Usa PostgreSQL como backend. |
+| Prometheus | 1 | 2 | 4 Gi | 50 Gi | Retención de métricas: 30 días. |
+| Loki | 1 | 1 | 2 Gi | 30 Gi | Retención de logs: 14 días. |
+| Tempo | 1 | 1 | 2 Gi | 20 Gi | Retención de trazas: 7 días. |
+| Grafana | 1 | 1 | 1 Gi | 1 Gi | — |
+
+**Resumen del clúster:**
+
+| Recurso | Total | Notas |
+|---|---|---|
+| Nodos | 4 app + 3 data + 1 infra | 8 nodos mínimo |
+| **vCPU total** | **~40 vCPU** | — |
+| **RAM total** | **~80 Gi** | — |
+| **Disco total** | **~600 Gi SSD** | Suma de todos los PVs |
+
+**Estimación de coste mensual en cloud:**
+
+| Proveedor | Tipo de instancia | Coste/mes estimado |
+|---|---|---|
+| OVH (bare metal VPS × 2) | 8 vCPU, 32 Gi RAM c/u | ~100–150 € |
+| Hetzner Cloud | 4 × CX41 (8 vCPU, 16 Gi) + 2 × CX51 (16 vCPU, 32 Gi) | ~300–400 € |
+| AWS (EC2 + RDS + DocumentDB + ElastiCache) | Equivalente gestionado | ~2500–4000 € |
+| **Prototipo actual** (VPS OVH 6 vCPU, 12 Gi) | — | **~12 €/mes** |
+
+El prototipo actual funciona sobre un único VPS de 12 €/mes con todas las bases de datos coexistiendo en el mismo nodo — suficiente para desarrollo y pruebas de carga moderadas (hasta ~500 VUs sin errores). La tabla anterior describe el dimensionamiento para producción a la escala objetivo de 50 M DAU.
+
+#### 6.4.6 Métricas de capacidad límite
+
+| Recurso | Límite identificado | Consecuencia | Mitigación |
+|---|---|---|---|
+| PostgreSQL — conexiones | ~200 conexiones directas (sin PgBouncer) | 3+ réplicas del monolito saturan el pool | PgBouncer multiplexando a 25 conexiones reales |
+| PostgreSQL — `SELECT FOR UPDATE` | ~250 reservas/s por zona | Cola de transacciones crece → p95 sube | Fila virtual ya limita la tasa de entrada |
+| MongoDB — lecturas/nodo | ~2 500 req/s por nodo | p95 > 2s | Replica set: 3 nodos → ~7 500 req/s combinados |
+| Redis — single thread | ~100 K ops/s | Límite duro por instancia | Redis Sentinel + sharding si se supera |
+| Redpanda — particiones | ~2 000 particiones por broker | Throughput de escritura degradado | Monitorear número de tópicos × particiones |
+| Monolito — Virtual Threads | ~10 K threads virtuales por GB de heap | Threads no se crean → timeouts | Escalar réplicas con HPA |
+
+---
+
 ## 7. Mecanismo anti-overbooking
 
 El anti-overbooking es la invariante de negocio más crítica del sistema. Se implementa mediante **tres capas de defensa superpuestas** que garantizan consistencia incluso bajo concurrencia extrema (1000+ peticiones simultáneas compitiendo por las mismas entradas).
@@ -1403,7 +1599,7 @@ Grafana se integra con Keycloak vía OAuth2. Acceso restringido por roles:
 
 ```mermaid
 flowchart TB
-    subgraph K3s["K3s Cluster (VPS OVH, 6 CPU, 12 GB RAM)"]
+    subgraph K3s["K3s Cluster (VPS OVH, 6 CPU, 12 GB RAM — prototipo)"]
         subgraph NS1["namespace: ticket-monster"]
             TM1[ticketmonster Pod 1]
             TM2[ticketmonster Pod 2 - HPA]
@@ -1444,6 +1640,8 @@ flowchart TB
 
 El sistema se despliega en un clúster **K3s** sobre un VPS con Debian 12. Se eligió K3s sobre soluciones cloud gestionadas (EKS, GKE, AKS) por coste (~12€/mes frente a cientos de euros), simplicidad (single binary) y suficiencia para el alcance del bootcamp.
 
+> **Nota:** Esta sección describe el despliegue actual del prototipo (single-node). El dimensionamiento para producción a la escala objetivo de 50 M DAU se detalla en la sección [6.4.5](#645-dimensionamiento-del-clúster-k3s).
+
 ### 14.2 Namespaces y servicios
 
 | Namespace | Servicios | Propósito |
@@ -1457,14 +1655,14 @@ El sistema se despliega en un clúster **K3s** sobre un VPS con Debian 12. Se el
 
 Cada componente se despliega mediante un chart de Helm independiente (13 charts en total):
 
-| Chart | Recurso | Storage |
-|---|---|---|
-| `ticketmonster` | Deployment (1 réplica, HPA opcional), ClusterIP, 2 Ingress | Sin storage |
-| `postgresql` | StatefulSet + Service | PVC (10 Gi) |
-| `mongodb` | StatefulSet + Service | PVC (10 Gi) |
-| `redis` | StatefulSet + Service | PVC (5 Gi) |
-| `redpanda` | StatefulSet + Service | PVC (10 Gi) |
-| `keycloak` | Deployment + Service + Ingress | PostgreSQL (schema `keycloak`) |
+| Chart | Recurso | Storage (prototipo) | Storage (producción, ver §6.4.5) |
+|---|---|---|---|
+| `ticketmonster` | Deployment (1 réplica, HPA opcional), ClusterIP, 2 Ingress | Sin storage | Sin storage |
+| `postgresql` | StatefulSet + Service | PVC (10 Gi) | PVC (200 Gi) |
+| `mongodb` | StatefulSet + Service | PVC (10 Gi) | PVC (10 Gi c/u, 3 nodos) |
+| `redis` | StatefulSet + Service | PVC (5 Gi) | PVC (10 Gi) |
+| `redpanda` | StatefulSet + Service | PVC (10 Gi) | PVC (50 Gi c/u, 3 brokers) |
+| `keycloak` | Deployment + Service + Ingress | PostgreSQL (schema `keycloak`) | PostgreSQL (schema `keycloak`) |
 
 ### 14.4 TLS y certificados
 
