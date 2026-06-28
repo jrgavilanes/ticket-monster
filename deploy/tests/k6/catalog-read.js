@@ -11,6 +11,7 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
+const EVENT_ID = __ENV.EVENT_ID || 'test-event-1';
 
 const EVENTS_QUERY = JSON.stringify({
     query: `{
@@ -30,7 +31,7 @@ const EVENTS_QUERY = JSON.stringify({
 
 const AVAILABILITY_QUERY = JSON.stringify({
     query: `{
-        availability(eventId: "test-event-1") {
+        availability(eventId: "${EVENT_ID}") {
             zoneId
             zoneName
             totalCapacity

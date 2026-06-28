@@ -4,6 +4,7 @@ import es.janrax.ticketmonster.payment.model.Payment;
 import es.janrax.ticketmonster.payment.model.PaymentAudit;
 import es.janrax.ticketmonster.payment.repository.PaymentAuditRepository;
 import es.janrax.ticketmonster.payment.repository.PaymentRepository;
+import es.janrax.ticketmonster.reservation.service.ReservationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -23,11 +24,13 @@ public class PaymentService {
 	private final PaymentRepository paymentRepository;
 	private final PaymentAuditRepository auditRepository;
 	private final KafkaTemplate<String, Object> kafkaTemplate;
+	private final ReservationService reservationService;
 
-	public PaymentService(PaymentRepository paymentRepository, PaymentAuditRepository auditRepository, KafkaTemplate<String, Object> kafkaTemplate) {
+	public PaymentService(PaymentRepository paymentRepository, PaymentAuditRepository auditRepository, KafkaTemplate<String, Object> kafkaTemplate, ReservationService reservationService) {
 		this.paymentRepository = paymentRepository;
 		this.auditRepository = auditRepository;
 		this.kafkaTemplate = kafkaTemplate;
+		this.reservationService = reservationService;
 	}
 
 	@Transactional
@@ -81,6 +84,8 @@ public class PaymentService {
 				"userId", saved.getUserId(),
 				"amount", saved.getAmount().toString()
 		));
+
+		reservationService.confirmSale(saved.getReservationId());
 
 		log.info("Payment {} confirmed for reservation {}", saved.getId(), saved.getReservationId());
 		return saved;

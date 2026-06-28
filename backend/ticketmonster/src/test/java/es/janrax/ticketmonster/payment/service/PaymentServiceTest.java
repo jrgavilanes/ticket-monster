@@ -4,6 +4,7 @@ import es.janrax.ticketmonster.payment.model.Payment;
 import es.janrax.ticketmonster.payment.model.PaymentAudit;
 import es.janrax.ticketmonster.payment.repository.PaymentAuditRepository;
 import es.janrax.ticketmonster.payment.repository.PaymentRepository;
+import es.janrax.ticketmonster.reservation.service.ReservationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -35,6 +36,9 @@ class PaymentServiceTest {
 
 	@Mock
 	private KafkaTemplate<String, Object> kafkaTemplate;
+
+	@Mock
+	private ReservationService reservationService;
 
 	@InjectMocks
 	private PaymentService paymentService;
@@ -133,6 +137,7 @@ class PaymentServiceTest {
 		assertThat(auditCaptor.getValue().getNewStatus()).isEqualTo("CONFIRMED");
 
 		verify(kafkaTemplate).send(eq("payment-confirmed"), eq("pay-1"), any(Map.class));
+		verify(reservationService).confirmSale(RESERVATION_ID);
 	}
 
 	@Test

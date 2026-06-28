@@ -12,15 +12,21 @@ export const options = {
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 const EVENT_ID = __ENV.EVENT_ID || 'test-event-1';
+
+const tokensFile = __ENV.TOKENS_FILE || '';
+const tokens = tokensFile ? JSON.parse(open(tokensFile)) : [];
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || '';
 
 export default function () {
+    const token = tokens.length > 0
+        ? tokens[__VU % tokens.length]
+        : AUTH_TOKEN;
     const res = http.post(
         `${BASE_URL}/api/v1/queue/${EVENT_ID}/join`,
         null,
         {
             headers: {
-                'Authorization': `Bearer ${AUTH_TOKEN}`,
+                'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json',
             },
         }

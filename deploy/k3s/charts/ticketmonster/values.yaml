@@ -15,11 +15,16 @@ ingress:
   host: janrax.es
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
-    traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticket-monster-rate-limit@kubernetescrd,ticket-monster-ticket-monster-secure-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticketmonster-rate-limit@kubernetescrd,ticket-monster-ticketmonster-secure-headers@kubernetescrd
   graphqlAnnotations:
     cert-manager.io/cluster-issuer: letsencrypt
-    traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticket-monster-secure-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: ticket-monster-ticketmonster-secure-headers@kubernetescrd
   tls: true
+
+rateLimit:
+  average: 10000
+  burst: 20000
+  period: 1s
 
 resources:
   requests:
@@ -52,3 +57,5 @@ env:
   KEYCLOAK_JWK_SET_URI: https://janrax.es/auth/realms/ticket-monster/protocol/openid-connect/certs
   RESERVATION_SCHEMA: reservation
   PAYMENT_SCHEMA: payment
+  QUEUE_BATCH_SIZE: "500"
+  QUEUE_BATCH_INTERVAL_MS: "2000"

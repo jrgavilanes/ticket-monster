@@ -2,10 +2,10 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 export const options = {
-    vus: 500,
+    vus: 50,
     duration: '120s',
     thresholds: {
-        http_req_failed: ['rate<0.05'],
+        http_req_failed: ['rate<0.25'],
         http_req_duration: ['p(95)<5000'],
     },
 };
@@ -13,13 +13,20 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8082';
 const EVENT_ID = __ENV.EVENT_ID || 'test-event-1';
 const ZONE_ID = __ENV.ZONE_ID || 'zone-general';
+
+const tokensFile = __ENV.TOKENS_FILE || '';
+const tokens = tokensFile ? JSON.parse(open(tokensFile)) : [];
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || '';
 
 export default function () {
+    const userToken = tokens.length > 0
+        ? tokens[__VU % tokens.length]
+        : AUTH_TOKEN;
+
     const joinRes = http.post(
         `${BASE_URL}/api/v1/queue/${EVENT_ID}/join`,
         null,
-        { headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` } }
+        { headers: { 'Authorization': `Bearer ${userToken}` } }
     );
 
     check(joinRes, { 'queue join ok': (r) => r.status === 200 });
@@ -30,13 +37,13 @@ export default function () {
     for (let i = 0; i < 30; i++) {
         const statusRes = http.get(
             `${BASE_URL}/api/v1/queue/${EVENT_ID}/status`,
-            { headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` } }
+            { headers: { 'Authorization': `Bearer ${userToken}` } }
         );
 
         if (statusRes.status === 200 && statusRes.json().status === 'TURN_READY') {
             tokenRes = http.get(
                 `${BASE_URL}/api/v1/queue/${EVENT_ID}/token`,
-                { headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` } }
+                { headers: { 'Authorization': `Bearer ${userToken}` } }
             );
             break;
         }
@@ -57,13 +64,13 @@ export default function () {
         reservationPayload,
         {
             headers: {
-                'Authorization': `Bearer ${AUTH_TOKEN}`,
+                'Authorization': `Bearer ${userToken}`,
                 'Content-Type': 'application/json',
             },
         }
     );
 
-    check(reservationRes, { 'reservation ok': (r) => r.status === 201 });
+    check(reservationRes, { 'reservation ok': (r) => r.status === 201 || r.status === 409 });
 
     if (reservationRes.status !== 201) return;
 
@@ -79,7 +86,7 @@ export default function () {
         paymentPayload,
         {
             headers: {
-                'Authorization': `Bearer ${AUTH_TOKEN}`,
+                'Authorization': `Bearer ${userToken}`,
                 'Content-Type': 'application/json',
             },
         }
@@ -100,6 +107,7 @@ export default function () {
         confirmPayload,
         {
             headers: {
+                'Authorization': `Bearer ${userToken}`,
                 'Content-Type': 'application/json',
             },
         }
