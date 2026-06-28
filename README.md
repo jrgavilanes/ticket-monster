@@ -1,6 +1,6 @@
 # Documento de Arquitectura de Software (SAD)
 
-## Sistema de Reservaciones de Alta Concurrencia — Ticket Monster
+## Sistema de Reservas de Alta Concurrencia — Ticket Monster
 
 **Versión:** 1.0  
 **Autor:** Juan Ramón Gavilanes Sánchez  
@@ -183,7 +183,7 @@ graph TD
     end
 
     subgraph Core["Ticket Monster"]
-        TM[Sistema de Reservaciones<br/>Monolito Modular]
+        TM[Sistema de Reservas<br/>Monolito Modular]
     end
 
     User -->|HTTPS| Traefik
