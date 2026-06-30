@@ -52,7 +52,7 @@ fi
 
 # 1. Sistema
 step \"Actualizando sistema e instalando dependencias...\"
-sudo apt update -qq && sudo apt upgrade -y -qq && sudo apt install -y -qq curl wget git tar
+sudo apt update -qq && sudo apt upgrade -y -qq && sudo apt install -y -qq curl wget git tar jq
 ok \"Sistema actualizado\"
 
 # 2. K3s
